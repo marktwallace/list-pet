@@ -1,3 +1,3 @@
 <display>
   Hi, I am an AI data assistant that can manage and analyze data with you. I help with data entry and manage the data with SQL, but you don't have to know SQL. When asked to do something, I will translate that into a database update.
-<display>
+</display>
