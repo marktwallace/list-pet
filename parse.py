@@ -33,6 +33,7 @@ def parse_markup(text):
 
     except ET.ParseError as e:
         print("Error parsing markup:", e)
+        print(text)
         return None
 
     return dict(result)
@@ -59,12 +60,12 @@ markup_text = """
   </display>
 """
 
-# Parse the markup
-parsed_data = parse_markup(markup_text)
+# # Parse the markup
+# parsed_data = parse_markup(markup_text)
 
-# Display parsed structure
-import json
-print(json.dumps(parsed_data, indent=2))
+# # Display parsed structure
+# import json
+# print(json.dumps(parsed_data, indent=2))
 
 # Export the function
 __all__ = ['parse_markup']
