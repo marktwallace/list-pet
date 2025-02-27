@@ -9,6 +9,8 @@ from langchain_core.prompts import (
 from langchain_openai import ChatOpenAI
 import os
 from parse import parse_markup
+import duckdb
+
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 st.title("🐇 List Pet")
@@ -49,6 +51,13 @@ if "message_log" not in st.session_state:
         "display": {"role": "ai", "content": rendered_first_message}
     })
 
+# Ensure db directory exists
+os.makedirs("db", exist_ok=True)
+
+# Create/connect to database in db directory
+if 'duckdb_connection' not in st.session_state:
+    st.session_state.duckdb_connection = duckdb.connect('db/list_pet.db')
+
 # Chat container
 chat_container = st.container()
 
@@ -68,19 +77,28 @@ with chat_container:
 # Chat input and processing
 user_query = st.chat_input("Type your coding question here...")
 
-def generate_ai_response_stream(prompt_chain):
+def generate_ai_response_stream(prompt_chain, variables):
     """Streams AI response token by token"""
     processing_pipeline = prompt_chain | llm_engine | StrOutputParser()
-    return processing_pipeline.stream({})
+    return processing_pipeline.stream(variables)
 
 def build_prompt_chain():
     prompt_sequence = [system_prompt]
+    # Create a variables dict for the template
+    variables = {}
+    
+    # Add any dataframes from previous queries
+    if hasattr(st.session_state, 'dataframes'):
+        variables.update(st.session_state.dataframes)
+    
     for msg in st.session_state.message_log:
         if msg["internal"]["role"] == "user":
             prompt_sequence.append(HumanMessagePromptTemplate.from_template(msg["internal"]["content"]))
         elif msg["internal"]["role"] == "ai":
             prompt_sequence.append(AIMessagePromptTemplate.from_template(msg["internal"]["content"]))
-    return ChatPromptTemplate.from_messages(prompt_sequence)
+    
+    template = ChatPromptTemplate.from_messages(prompt_sequence)
+    return template, variables  # Return both template and variables
 
 if user_query:
     # Save the new query in session_state so it shows immediately
@@ -92,23 +110,55 @@ if user_query:
     st.rerun()
 
 if "pending_query" in st.session_state:
+    print("Processing pending query...")  # Debug print 1
     with st.chat_message("ai"):
-        response_container = st.empty()  # Placeholder for streaming response
+        response_container = st.empty()
         full_response = ""
 
         with st.spinner("🧠 Processing..."):
-            prompt_chain = build_prompt_chain()
-            for chunk in generate_ai_response_stream(prompt_chain):
+            prompt_chain, variables = build_prompt_chain()
+            for chunk in generate_ai_response_stream(prompt_chain, variables):  # Pass variables here
                 full_response += chunk
-                response_container.markdown(full_response)  # Update message live
+                response_container.markdown(full_response)
 
-        # Store final AI response
-        parsed_response = parse_markup(full_response).get("display", [])
-        rendered_response = "\n".join(item['text'] for item in parsed_response)
+        # First store the complete internal response
+        print("Parsing response...")  # Debug print 2
+        parsed_response = parse_markup(full_response)
+        print(f"Found SQL blocks: {len(parsed_response.get('sql', []))}")  # Debug print 3
+        message_index = len(st.session_state.message_log)
         st.session_state.message_log.append({
             "internal": {"role": "ai", "content": full_response},
-            "display": {"role": "ai", "content": rendered_response}
+            "display": {"role": "ai", "content": "Processing SQL..."}
         })
+
+        # Then process SQL blocks
+        sql_errors = []
+        print(f"SQL blocks content: {parsed_response.get('sql', [])}")
+        for block in parsed_response.get("sql", []):
+            print(f"Processing block: {block}")
+            sql = block.get("query", "")
+            df_name = block.get("df")
+            
+            print(f"Extracted SQL: '{sql}', df_name: '{df_name}'")
+            
+            if sql:
+                print(f"Running SQL: {sql}")
+                try:
+                    result = st.session_state.duckdb_connection.execute(sql)
+                    if df_name:
+                        print(f"Storing result in dataframe: {df_name}")
+                        st.session_state.dataframes[df_name] = result.df()
+                except Exception as e:
+                    print(f"SQL Error: {str(e)}")
+                    sql_errors.append(f"SQL Error: {str(e)}")
+
+        # Finally, update the display portion with results
+        display_text = "\n".join(item['text'] for item in parsed_response.get("display", []))
+        if sql_errors:
+            display_text += "\n\n⚠️ SQL Errors:\n" + "\n".join(sql_errors)
+        
+        # Update the stored message with final display content
+        st.session_state.message_log[message_index]["display"]["content"] = display_text
     
     # Clear the pending flag
     del st.session_state.pending_query
