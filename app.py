@@ -30,14 +30,15 @@ llm_engine = ChatOpenAI(
 )
 
 # System prompt configuration
-system_prompt = SystemMessagePromptTemplate.from_template(
-    "You are an expert AI coding assistant. Provide concise, correct solutions "
-    "with strategic print statements for debugging. Always respond in English."
-)
+with open('prompts/system.txt', 'r') as f:
+    system_template = f.read()
+system_prompt = SystemMessagePromptTemplate.from_template(system_template)
 
 # Session state management
 if "message_log" not in st.session_state:
-    st.session_state.message_log = [{"role": "ai", "content": "Hi! I'm DeepSeek. How can I help you code today? 💻"}]
+    with open('prompts/first.txt', 'r') as f:
+        first_message = f.read()
+    st.session_state.message_log = [{"role": "ai", "content": first_message}]
 
 # Chat container
 chat_container = st.container()
