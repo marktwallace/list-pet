@@ -35,6 +35,7 @@ llm_engine = ChatOpenAI(
 # System prompt configuration
 with open('prompts/system.txt', 'r') as f:
     system_template = f.read()
+    #print("system.txt:", system_template)
 system_prompt = SystemMessagePromptTemplate.from_template(system_template)
 
 # Session state management
@@ -110,56 +111,71 @@ if user_query:
     st.rerun()
 
 if "pending_query" in st.session_state:
-    print("Processing pending query...")  # Debug print 1
-    with st.chat_message("ai"):
-        response_container = st.empty()
-        full_response = ""
+    print("Processing pending query...")
+    full_response = ""
 
-        with st.spinner("🧠 Processing..."):
-            prompt_chain, variables = build_prompt_chain()
-            for chunk in generate_ai_response_stream(prompt_chain, variables):  # Pass variables here
-                full_response += chunk
-                response_container.markdown(full_response)
-
-        # First store the complete internal response
-        print("Parsing response...")  # Debug print 2
-        parsed_response = parse_markup(full_response)
-        print(f"Found SQL blocks: {len(parsed_response.get('sql', []))}")  # Debug print 3
-        message_index = len(st.session_state.message_log)
-        st.session_state.message_log.append({
-            "internal": {"role": "ai", "content": full_response},
-            "display": {"role": "ai", "content": "Processing SQL..."}
-        })
-
-        # Then process SQL blocks
-        sql_errors = []
-        print(f"SQL blocks content: {parsed_response.get('sql', [])}")
-        for block in parsed_response.get("sql", []):
-            print(f"Processing block: {block}")
-            sql = block.get("query", "")
-            df_name = block.get("df")
-            
-            print(f"Extracted SQL: '{sql}', df_name: '{df_name}'")
-            
-            if sql:
-                print(f"Running SQL: {sql}")
-                try:
-                    result = st.session_state.duckdb_connection.execute(sql)
-                    if df_name:
-                        print(f"Storing result in dataframe: {df_name}")
-                        st.session_state.dataframes[df_name] = result.df()
-                except Exception as e:
-                    print(f"SQL Error: {str(e)}")
-                    sql_errors.append(f"SQL Error: {str(e)}")
-
-        # Finally, update the display portion with results
-        display_text = "\n".join(item['text'] for item in parsed_response.get("display", []))
-        if sql_errors:
-            display_text += "\n\n⚠️ SQL Errors:\n" + "\n".join(sql_errors)
+    with st.spinner("🧠 Processing..."):
+        prompt_chain, variables = build_prompt_chain()
         
-        # Update the stored message with final display content
-        st.session_state.message_log[message_index]["display"]["content"] = display_text
+        # If showing internal messages, stream to a separate chat message
+        if show_internal:
+            with st.chat_message("internal"):
+                internal_container = st.empty()
+                internal_response = ""
+                for chunk in generate_ai_response_stream(prompt_chain, variables):
+                    full_response += chunk
+                    internal_response += chunk
+                    internal_container.markdown(internal_response)
+        else:
+            # Otherwise just collect the response without streaming
+            for chunk in generate_ai_response_stream(prompt_chain, variables):
+                full_response += chunk
+
+    # Process the AI response
+    parsed_response = parse_markup(full_response)
     
-    # Clear the pending flag
-    del st.session_state.pending_query
-    st.rerun()
+    # Process SQL blocks and store results
+    sql_errors = []
+    for block in parsed_response.get("sql", []):
+        sql = block.get("query", "")
+        df_name = block.get("df")
+        
+        if sql:
+            try:
+                result = st.session_state.duckdb_connection.execute(sql)
+                if df_name:
+                    df = result.df()
+                    st.session_state.dataframes[df_name] = df
+            except Exception as e:
+                sql_errors.append(f"SQL Error: {str(e)}")
+
+    # Show only the display content, not the reasoning and SQL
+    display_text = []
+    for item in parsed_response.get("display", []):
+        display_text.append(item['text'])
+    
+    final_display = "\n\n".join(display_text)
+    if sql_errors:
+        final_display += "\n\n⚠️ SQL Errors:\n" + "\n".join(sql_errors)
+        
+    # Show the AI's response in its own chat message
+    with st.chat_message("ai"):
+        # Show just the display content
+        st.markdown(final_display)
+        
+        # Display any dataframes from SQL queries that specified a df attribute
+        for block in parsed_response.get("sql", []):
+            if block.get("df"):  # Only if df was specified
+                df_name = block["df"]
+                if df_name in st.session_state.dataframes:
+                    st.dataframe(st.session_state.dataframes[df_name])
+
+    # Store the response in message history
+    st.session_state.message_log.append({
+        "internal": {"role": "ai", "content": full_response},
+        "display": {"role": "ai", "content": final_display}
+    })
+    
+    # Clear the pending flag without triggering a rerun
+    if "pending_query" in st.session_state:
+        del st.session_state.pending_query
