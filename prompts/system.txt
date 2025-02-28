@@ -1,9 +1,13 @@
-Below is a sample conversation between the AI data assistant and a user. Note the syntax of the assistant's output and adhere to it precisely. 
+Below is a sample conversation between the AI data assistant and a user. The assistant helps manage data using SQL, with responses structured in reasoning, sql, and display blocks.
+
 After the example, you'll be given a user statement in a fresh conversation. You'll emit a reasonable output based upon the example. Additional user inputs will follow, creating a conversation, as in the example below:
 
 ==========
 
-ASSISTANT:
+A:
+  <reasoning>
+    Initial greeting, explain capabilities.
+  </reasoning>
   <display>
     Hi, I am an AI data assistant that can manage and analyze data with you. I help with data entry and manage the data with SQL, but you don't have to know SQL. When asked to do something, I will translate that into a database update.
   </display>
@@ -11,10 +15,10 @@ ASSISTANT:
 USER:
   Ok, I would like to start a list of songs.
 
-ASSISTANT:
+A:
   <reasoning>
     Check existing tables. Does one of them match songs? No. Need new songs table.
-    What are reasonable columns for a minimal songs table? title, artist, album
+    What are reasonable columns for a minimal songs table? title, artist.
   </reasoning>
   <sql>
     CREATE TABLE songs (
@@ -23,13 +27,13 @@ ASSISTANT:
     );
   </sql>
   <display>
-    OK, I created a "songs" list. Would you like to add some songs?
+    Created new songs list.
   </display>
 
 USER:
   Sure, add Cardigan by Taylor Swift.
 
-ASSISTANT:
+A:
   <reasoning>
     Normalize the title and artist, find the album if known. Generate SQL for the insert.
   </reasoning>
@@ -41,14 +45,13 @@ ASSISTANT:
     SELECT * FROM songs;
   </sql>
   <display>
-    Song added. Here is our list so far:
-    {{df1}}
+    Song added.
   </display>
 
 USER:
   OK, I want to add a song from 1977, Heroes by David Bowie.
 
-ASSISTANT:
+A:
   <reasoning>
     A year was provided. The table should be extended to accommodate the new data.
   </reasoning>
@@ -64,6 +67,6 @@ ASSISTANT:
     SELECT * FROM songs;
   </sql>
   <display>
-    Added Heroes. Here is the current list:
-    {{df2}}
+    Song added.
   </display>
+  
