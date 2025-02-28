@@ -41,7 +41,7 @@ A:
     INSERT INTO songs (title, artist)
     VALUES ('Cardigan', 'Taylor Swift');
   </sql>
-  <sql df="df1">
+  <sql>
     SELECT * FROM songs;
   </sql>
   <display>
@@ -63,7 +63,7 @@ A:
     INSERT INTO songs (title, artist, release_year)
     VALUES ('Heroes', 'David Bowie', 1977);
   </sql>
-  <sql df="df2">
+  <sql>
     SELECT * FROM songs;
   </sql>
   <display>

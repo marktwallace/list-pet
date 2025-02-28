@@ -138,14 +138,21 @@ if "pending_query" in st.session_state:
     sql_errors = []
     for block in parsed_response.get("sql", []):
         sql = block.get("query", "")
-        df_name = block.get("df")
         
         if sql:
             try:
+                # Execute the SQL
                 result = st.session_state.duckdb_connection.execute(sql)
-                if df_name:
-                    df = result.df()
-                    st.session_state.dataframes[df_name] = df
+                
+                # If it's a SELECT statement and returns data, display it
+                if sql.strip().upper().startswith("SELECT"):
+                    try:
+                        df = result.df()
+                        if not df.empty:
+                            st.dataframe(df)
+                    except Exception as e:
+                        sql_errors.append(f"Error displaying results: {str(e)}")
+                        
             except Exception as e:
                 sql_errors.append(f"SQL Error: {str(e)}")
 
@@ -162,13 +169,6 @@ if "pending_query" in st.session_state:
     with st.chat_message("ai"):
         # Show just the display content
         st.markdown(final_display)
-        
-        # Display any dataframes from SQL queries that specified a df attribute
-        for block in parsed_response.get("sql", []):
-            if block.get("df"):  # Only if df was specified
-                df_name = block["df"]
-                if df_name in st.session_state.dataframes:
-                    st.dataframe(st.session_state.dataframes[df_name])
 
     # Store the response in message history
     st.session_state.message_log.append({
