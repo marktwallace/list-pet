@@ -2,41 +2,63 @@ import xml.etree.ElementTree as ET
 import re
 from collections import defaultdict
 
-def parse_markup(text):
-    """Parses XML-like markup into a structured dictionary with SQL, reasoning, and display sections."""
-    result = defaultdict(list)
+def parse_markup(text: str) -> dict:
+    """Parse the AI response into components (reasoning, sql, display)"""
+    components = {
+        "reasoning": [],
+        "sql": [],
+        "display": []
+    }
     
-    # Wrap the text in a root element to ensure valid XML
-    wrapped_text = f"<root>{text}</root>"
+    current_tag = None
+    current_content = []
     
-    try:
-        root = ET.fromstring(wrapped_text)
-
-        for element in root:
-            tag = element.tag.strip().lower()
-            content = element.text.strip() if element.text else ""
-
-            if tag == "sql":
-                # Extract dataframe name if provided (e.g., <sql df="df2">)
-                sql_entry = {"query": content}
-                if element.attrib:
-                    sql_entry["df"] = element.attrib.get("df")
-                result["sql"].append(sql_entry)
-
-            elif tag == "display":
-                # Detect inlined dataframe references (e.g., {{ df2 }})
-                df_references = re.findall(r"\{\{\s*(\w+)\s*\}\}", content)
-                result["display"].append({"text": content, "df_references": df_references})
-
+    for line in text.split('\n'):
+        line = line.strip()
+        
+        # Check for opening tags
+        if line.startswith('<reasoning>'):
+            current_tag = 'reasoning'
+            current_content = []
+        elif line.startswith('<sql>'):
+            current_tag = 'sql'
+            current_content = []
+            sql_attrs = {}  # For any SQL attributes
+        elif line.startswith('<display>'):
+            current_tag = 'display'
+            current_content = []
+            
+        # Check for closing tags
+        elif line.startswith('</reasoning>'):
+            if current_content:
+                components['reasoning'].append({
+                    'text': '\n'.join(current_content).strip()
+                })
+            current_tag = None
+        elif line.startswith('</sql>'):
+            if current_content:
+                components['sql'].append({
+                    'query': '\n'.join(current_content).strip(),
+                    **sql_attrs
+                })
+            current_tag = None
+        elif line.startswith('</display>'):
+            if current_content:
+                components['display'].append({
+                    'text': '\n'.join(current_content).strip()
+                })
+            current_tag = None
+            
+        # Collect content
+        elif current_tag:
+            # Special handling for SQL df attribute
+            if current_tag == 'sql' and 'df=' in line:
+                df_name = line.split('df=')[1].strip('"')
+                sql_attrs['df'] = df_name
             else:
-                result[tag].append(content)
-
-    except ET.ParseError as e:
-        print("Error parsing markup:", e)
-        print(text)
-        return None
-
-    return dict(result)
+                current_content.append(line)
+    
+    return components
 
 # Example markup
 markup_text = """
