@@ -1,10 +1,13 @@
 Below is a sample conversation between the AI data assistant and a user. The assistant helps manage data using DuckDB SQL, with responses structured in reasoning, sql, and display blocks.
 
+The conversation includes three distinct voices:
+- User messages are direct input
+- Assistant messages use <reasoning>, <sql>, and <display> blocks
+- DuckDB messages show SQL execution results and errors
+
 After the example, you'll be given a user statement in a fresh conversation. You'll emit a reasonable output based upon the example. Additional user inputs will follow, creating a conversation, as in the example below:
 
-==========
-
-A:
+Assistant:
   <reasoning>
     Initial greeting, explain capabilities.
   </reasoning>
@@ -15,10 +18,10 @@ A:
     - Query and analyze your data
   </display>
 
-USER:
+User:
   Ok, I would like to start a list of songs.
 
-A:
+Assistant:
   <reasoning>
     Check existing tables. Does one of them match songs? No. Need new songs table.
     What are reasonable columns for a minimal songs table? title, artist.
@@ -29,14 +32,40 @@ A:
         artist TEXT
     );
   </sql>
+
+DuckDB:
+  D CREATE TABLE songs (title TEXT, artist TEXT);
+  Query executed successfully
+
+Assistant:
   <display>
     Created new songs list.
   </display>
 
-USER:
+User:
+  Show me the tables.
+
+DuckDB:
+  D SHOW TABLES;
+  ┌─────────┐
+  │  name   │
+  │ varchar │
+  ├─────────┤
+  │ songs   │
+  └─────────┘
+
+Assistant:
+  <reasoning>
+    The database has one table called 'songs' that we just created.
+  </reasoning>
+  <display>
+    I can see the 'songs' table in the database. Would you like to add some songs to it?
+  </display>
+
+User:
   Sure, add Cardigan by Taylor Swift.
 
-A:
+Assistant:
   <reasoning>
     Normalize the title and artist, find the album if known. Generate SQL for the insert.
   </reasoning>
@@ -51,10 +80,10 @@ A:
     Song added.
   </display>
 
-USER:
+User:
   OK, I want to add a song from 1977, Heroes by David Bowie.
 
-A:
+Assistant:
   <reasoning>
     A year was provided. The table needs a new column. In DuckDB, ALTER TABLE can only add one column at a time.
   </reasoning>
@@ -73,10 +102,10 @@ A:
     Song added.
   </display>
 
-USER:
+User:
   Can you import my playlist from a CSV file?
 
-A:
+Assistant:
   <reasoning>
     The user wants to import a CSV file, but I need the file path. I should ask for clarification before executing any SQL.
   </reasoning>
@@ -84,10 +113,10 @@ A:
     I can help you import your playlist from a CSV file. Please provide the path to your CSV file. The file should have columns for song information (like title, artist, etc.). What is the path to your CSV file?
   </display>
 
-USER:
+User:
   The file is at data/my_playlist.csv
 
-A:
+Assistant:
   <reasoning>
     Now I have the file path, I can use DuckDB's read_csv function to import the data.
   </reasoning>

@@ -3,6 +3,23 @@ import os
 from chat import ChatEngine, get_chat_engine
 from database import Database, get_database
 from parse import parse_markup
+import re
+import pandas as pd
+
+def format_sql_result(query: str, df: pd.DataFrame | None, error: str | None) -> str:
+    """Format SQL results to match DuckDB CLI style"""
+    output = [f"D {query}"]
+    
+    if error:
+        output.append(f"Error: {error}")
+    elif df is not None:
+        # Convert DataFrame to CLI-style table
+        table_str = df.to_string(index=False)
+        output.append(table_str)
+    else:
+        output.append("Query executed successfully")
+    
+    return "\n".join(output)
 
 # Initialize session state
 if "message_log" not in st.session_state:
@@ -66,12 +83,50 @@ for message in st.session_state.message_log:
 
 # Handle new messages
 if user_query := st.chat_input("Type your question here..."):
-    st.session_state.pending_query = user_query
-    st.session_state.message_log.append({
-        "internal": {"role": "user", "content": user_query},
-        "display": {"role": "user", "content": user_query}
-    })
-    st.rerun()
+    # Check if this is a direct SQL query
+    is_sql = False
+    stripped_query = user_query.strip()
+    
+    # Check for explicit SQL markup
+    if stripped_query.startswith("<sql>"):
+        is_sql = True
+        # Remove the SQL tags if present
+        user_query = stripped_query.replace("<sql>", "").replace("</sql>", "").strip()
+    
+    # Check for common SQL statement patterns (two word combinations)
+    sql_patterns = r"^\s*(SELECT\s+\*|SELECT\s+\w+|CREATE\s+TABLE|DROP\s+TABLE|ALTER\s+TABLE|INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+\w+|SHOW\s+TABLES|DESCRIBE\s+\w+|EXPLAIN\s+\w+)\s*.*"
+    if re.match(sql_patterns, stripped_query, re.IGNORECASE):
+        is_sql = True
+    
+    if is_sql:
+        # Execute SQL directly
+        with st.chat_message("user"):
+            st.markdown(f"```sql\n{user_query}\n```")
+        
+        df, error = db.execute_query(user_query)
+        result_text = format_sql_result(user_query, df, error)
+        
+        # Display as DuckDB message
+        with st.chat_message("ai"):
+            st.markdown(f"```\nDuckDB:\n{result_text}\n```")
+        
+        # Add to message history
+        st.session_state.message_log.append({
+            "internal": {"role": "user", "content": user_query},
+            "display": {"role": "user", "content": f"```sql\n{user_query}\n```"}
+        })
+        st.session_state.message_log.append({
+            "internal": {"role": "ai", "content": f"DuckDB:\n{result_text}"},
+            "display": {"role": "ai", "content": f"```\nDuckDB:\n{result_text}\n```"}
+        })
+    else:
+        # Normal AI interaction path
+        st.session_state.pending_query = user_query
+        st.session_state.message_log.append({
+            "internal": {"role": "user", "content": user_query},
+            "display": {"role": "user", "content": user_query}
+        })
+        st.rerun()
 
 if "pending_query" in st.session_state:
     print("Processing pending query...")
@@ -101,14 +156,20 @@ if "pending_query" in st.session_state:
     sql_errors = []
     display_text = []
     
-    # Handle SQL execution
+    # Handle SQL execution in AI responses
     for block in parsed_response.get("sql", []):
         if sql := block.get("query"):
             df, error = db.execute_query(sql)
+            result_text = format_sql_result(sql, df, error)
+            with st.chat_message("ai"):
+                st.markdown(f"```\nDuckDB:\n{result_text}\n```")
+            # Add DuckDB result to message history
+            st.session_state.message_log.append({
+                "internal": {"role": "ai", "content": f"DuckDB:\n{result_text}"},
+                "display": {"role": "ai", "content": f"```\nDuckDB:\n{result_text}\n```"}
+            })
             if error:
                 sql_errors.append(error)
-            if df is not None:
-                st.dataframe(df)
     
     # Collect display text
     for item in parsed_response.get("display", []):

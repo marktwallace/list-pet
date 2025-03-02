@@ -18,8 +18,8 @@ class Database:
         try:
             result = self.conn.execute(sql)
             
-            # If it's a SELECT statement and returns data, return the dataframe
-            if sql.strip().upper().startswith("SELECT"):
+            # If it's a SELECT or SHOW statement and returns data, return the dataframe
+            if sql.strip().upper().startswith(("SELECT", "SHOW", "DESCRIBE")):
                 try:
                     df = result.df()
                     if not df.empty:
