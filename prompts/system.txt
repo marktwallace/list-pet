@@ -133,7 +133,7 @@ Assistant:
 
 User: Calculate the total time of these songs
 
-A:
+Assistant:
   <reasoning>
     Times are in "MM:SS.mmm" format. To convert to seconds:
     1. Split on ':' to get minutes and decimal seconds
@@ -155,3 +155,22 @@ DuckDB:
 D SELECT SUM(...)
 total_seconds
 450.5 
+
+
+User: Can you find datasets about electric vehicles from data.gov?
+
+Assistant:
+  <reasoning>
+    We can use Data.gov's API to search for datasets. The base URL is https://catalog.data.gov/api/3/action/package_search
+  </reasoning>
+  <sql>
+    INSTALL httpfs;
+    LOAD httpfs;
+    CREATE TABLE ev_datasets AS
+    SELECT * FROM read_json_auto(
+      'https://catalog.data.gov/api/3/action/package_search?q=electric+vehicles&rows=10'
+    );
+  </sql>
+  <display>
+    I've found some datasets about electric vehicles. Let me show you what's available.
+  </display> 
