@@ -7,17 +7,30 @@ import re
 import pandas as pd
 
 def format_sql_result(query: str, df: pd.DataFrame | None, error: str | None) -> str:
-    """Format SQL results to match DuckDB CLI style"""
-    output = [f"D {query}"]
+    """Format SQL results to match DuckDB CLI style with clear formatting"""
+    output = []
     
+    # Add query with clear SQL marker
+    output.append("SQL Query:")
+    output.append(f"```sql\n{query}\n```")
+    
+    # Add result with appropriate formatting
     if error:
-        output.append(f"Error: {error}")
+        output.append("Error:")
+        output.append(f"```\n{error}\n```")
     elif df is not None:
-        # Convert DataFrame to CLI-style table
-        table_str = df.to_string(index=False)
-        output.append(table_str)
+        output.append("Result:")
+        # Format DataFrame with consistent spacing and alignment
+        table_str = df.to_string(
+            index=False,
+            justify='left',
+            col_space=2,
+            max_colwidth=40
+        )
+        output.append("```\n" + table_str + "\n```")
     else:
-        output.append("Query executed successfully")
+        output.append("Result:")
+        output.append("```\nQuery executed successfully\n```")
     
     return "\n".join(output)
 
@@ -38,8 +51,12 @@ def display_message(message: dict, show_internal: bool):
     if message["display"]["role"] == "ai":
         if show_internal:
             with st.chat_message("internal"):
-                st.markdown(message["internal"]["content"])
-        # Only show display message if content is not None
+                content = message["internal"]["content"]
+                # Ensure code blocks are properly formatted in markdown
+                if content.startswith("DuckDB:"):
+                    # Remove DuckDB: prefix and ensure proper code block
+                    content = content.replace("DuckDB:", "DuckDB Result:").strip()
+                st.markdown(content, unsafe_allow_html=False)
         if message["display"]["content"] is not None:
             with st.chat_message(message["display"]["role"]):
                 st.markdown(message["display"]["content"])
@@ -47,7 +64,52 @@ def display_message(message: dict, show_internal: bool):
         with st.chat_message(message["display"]["role"]):
             st.markdown(message["display"]["content"])
 
-def execute_sql(query: str, show_internal: bool, db: Database):
+def count_messages_since_last_user(message_log: list) -> int:
+    """Count number of AI messages since last user message"""
+    count = 0
+    for message in reversed(message_log):
+        if message["internal"]["role"] == "user":
+            break
+        if message["internal"]["role"] == "ai":
+            count += 1
+    return count
+
+def should_process_sql_result(message_log: list, error: bool) -> bool:
+    """Determine if we should have AI process this SQL result"""
+    # Check message count to prevent infinite loops
+    if count_messages_since_last_user(message_log) >= 3:
+        return False
+    # Always process errors, otherwise only if it's right after user input
+    return error or count_messages_since_last_user(message_log) == 1
+
+def process_sql_result(result_text: str, show_internal: bool, chat_engine: ChatEngine, db: Database):
+    """Have AI process SQL result and potentially respond"""
+    # Create a message chain with the SQL result
+    messages = st.session_state.message_log.copy()
+    messages.append({
+        "internal": {"role": "ai", "content": f"DuckDB:\n{result_text}"},
+        "display": {"role": "ai", "content": None}
+    })
+    
+    prompt_chain = chat_engine.build_prompt_chain(messages)
+    full_response = ""
+    
+    with st.spinner("🤔 Processing SQL result..."):
+        for chunk in chat_engine.generate_response_stream(prompt_chain):
+            full_response += chunk
+    
+    # Only process if AI actually had a response
+    if full_response.strip():
+        final_display, sql_results = process_ai_response(full_response, show_internal, db, chat_engine)
+        
+        # Only show and add to history if there was display content
+        if final_display.strip():
+            with st.chat_message("ai"):
+                st.markdown(final_display)
+            
+            update_message_history(full_response, final_display, sql_results)
+
+def execute_sql(query: str, show_internal: bool, db: Database, chat_engine: ChatEngine):
     """Execute SQL and show results if needed"""
     df, error = db.execute_query(query)
     result_text = format_sql_result(query, df, error)
@@ -56,14 +118,18 @@ def execute_sql(query: str, show_internal: bool, db: Database):
         with st.chat_message("internal"):
             st.markdown(f"```\nDuckDB:\n{result_text}\n```")
     
+    # Check if AI should process this result
+    if should_process_sql_result(st.session_state.message_log, error):
+        process_sql_result(result_text, show_internal, chat_engine, db)
+    
     return result_text, error
 
-def handle_sql_query(query: str, show_internal: bool, db: Database):
+def handle_sql_query(query: str, show_internal: bool, db: Database, chat_engine: ChatEngine):
     """Handle direct SQL query from user"""
     with st.chat_message("user"):
         st.markdown(f"```sql\n{query}\n```")
     
-    result_text, error = execute_sql(query, show_internal, db)
+    result_text, error = execute_sql(query, show_internal, db, chat_engine)
     
     # Add to message history
     st.session_state.message_log.append({
@@ -86,7 +152,7 @@ def process_ai_response(response: str, show_internal: bool, db: Database, chat_e
     # Handle SQL execution
     for block in parsed_response.get("sql", []):
         if sql := block.get("query"):
-            result_text, error = execute_sql(sql, show_internal, db)
+            result_text, error = execute_sql(sql, show_internal, db, chat_engine)
             sql_results.append(result_text)
             if error:
                 sql_errors.append(error)
@@ -206,7 +272,7 @@ def main():
     # Handle new messages
     if user_query := st.chat_input("Type your question here..."):
         if is_sql_query(user_query):
-            handle_sql_query(user_query, show_internal, db)
+            handle_sql_query(user_query, show_internal, db, chat_engine)
         else:
             st.session_state.pending_query = user_query
             st.session_state.message_log.append({

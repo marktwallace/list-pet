@@ -130,4 +130,28 @@ Assistant:
   <display>
     I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly.
   </display>
-  
+
+User: Calculate the total time of these songs
+
+A:
+  <reasoning>
+    Times are in "MM:SS.mmm" format. To convert to seconds:
+    1. Split on ':' to get minutes and decimal seconds
+    2. Minutes * 60 + decimal seconds gives total seconds
+  </reasoning>
+  <sql>
+    SELECT 
+      SUM(
+        CAST(SPLIT_PART("Total Time", ':', 1) AS FLOAT) * 60 +  -- Minutes to seconds
+        CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT)         -- Decimal seconds
+      ) AS total_seconds
+    FROM songs;
+  </sql>
+  <display>
+    The total length of all songs is {{total_seconds}} seconds (about {{total_seconds/60:.1f}} minutes).
+  </display>
+
+DuckDB:
+D SELECT SUM(...)
+total_seconds
+450.5 
