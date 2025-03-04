@@ -9,6 +9,10 @@ from langchain_core.output_parsers import StrOutputParser
 from parse import parse_markup
 import streamlit as st
 
+# Add these constants to match app.py
+ASSISTANT_ROLE = "Assistant"
+USER_ROLE = "User"
+
 @st.cache_resource
 def get_chat_engine(model_name: str):
     """Get or create chat engine"""
@@ -29,10 +33,12 @@ class ChatEngine:
         prompt_sequence = [self.system_prompt]
         
         for msg in message_log:
-            if msg["internal"]["role"] == "user":
-                prompt_sequence.append(HumanMessagePromptTemplate.from_template(msg["internal"]["content"]))
-            elif msg["internal"]["role"] == "ai":
-                prompt_sequence.append(AIMessagePromptTemplate.from_template(msg["internal"]["content"]))
+            if msg["role"] == USER_ROLE:
+                prompt_sequence.append(HumanMessagePromptTemplate.from_template(msg["content"]))
+            elif msg["role"] == ASSISTANT_ROLE:
+                prompt_sequence.append(AIMessagePromptTemplate.from_template(msg["content"]))
+            else:
+                raise ValueError(f"Unknown message role: {msg['role']}")
         
         return ChatPromptTemplate.from_messages(prompt_sequence)
     
@@ -40,6 +46,11 @@ class ChatEngine:
         """Streams AI response token by token"""
         processing_pipeline = prompt_chain | self.llm | StrOutputParser()
         return processing_pipeline.stream({})  # Empty variables dict since we don't use templating
+    
+    def generate_response(self, message_log) -> str:
+        """Generate a complete response from message history"""
+        prompt_chain = self.build_prompt_chain(message_log)
+        return "".join(self.generate_response_stream(prompt_chain))
     
     def parse_response(self, response: str) -> dict:
         """Parse the AI response into components"""

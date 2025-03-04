@@ -3,62 +3,43 @@ import re
 from collections import defaultdict
 
 def parse_markup(text: str) -> dict:
-    """Parse the AI response into components (reasoning, sql, display)"""
-    components = {
-        "reasoning": [],
-        "sql": [],
-        "display": []
-    }
+    """Parse the AI response into structured components (reasoning, sql, display)."""
+    
+    blocks = ["reasoning", "sql", "display"]
+    components = {block: [] for block in blocks}
     
     current_tag = None
     current_content = []
-    
+
     for line in text.split('\n'):
         line = line.strip()
-        
-        # Check for opening tags
-        if line.startswith('<reasoning>'):
-            current_tag = 'reasoning'
-            current_content = []
-        elif line.startswith('<sql>'):
-            current_tag = 'sql'
-            current_content = []
-            sql_attrs = {}  # For any SQL attributes
-        elif line.startswith('<display>'):
-            current_tag = 'display'
-            current_content = []
-            
-        # Check for closing tags
-        elif line.startswith('</reasoning>'):
-            if current_content:
-                components['reasoning'].append({
-                    'text': '\n'.join(current_content).strip()
-                })
-            current_tag = None
-        elif line.startswith('</sql>'):
-            if current_content:
-                components['sql'].append({
-                    'query': '\n'.join(current_content).strip(),
-                    **sql_attrs
-                })
-            current_tag = None
-        elif line.startswith('</display>'):
-            if current_content:
-                components['display'].append({
-                    'text': '\n'.join(current_content).strip()
-                })
-            current_tag = None
-            
-        # Collect content
+
+        # Check for opening and closing tags dynamically
+        matched_block = next((block for block in blocks if line == f"<{block}>" or line == f"</{block}>"), None)
+
+        if matched_block:
+            if line == f"<{matched_block}>":
+                current_tag = matched_block
+                current_content = []
+            elif line == f"</{matched_block}>":
+                if current_content:
+                    components[matched_block].append(
+                        {"query" if matched_block == "sql" else "text": '\n'.join(current_content).strip()}
+                    )
+                current_tag = None
         elif current_tag:
-            # Special handling for SQL df attribute
-            if current_tag == 'sql' and 'df=' in line:
-                df_name = line.split('df=')[1].strip('"')
-                sql_attrs['df'] = df_name
-            else:
-                current_content.append(line)
-    
+            current_content.append(line)
+
+    # Ensure unclosed tags still get included
+    if current_tag and current_content:
+        components[current_tag].append(
+            {"query" if current_tag == "sql" else "text": '\n'.join(current_content).strip()}
+        )
+
     return components
+
+# Export function
+__all__ = ['parse_markup']
 
 # Example markup
 markup_text = """
@@ -82,12 +63,10 @@ markup_text = """
   </display>
 """
 
-# # Parse the markup
-# parsed_data = parse_markup(markup_text)
+# Parse the markup
+#parsed_data = parse_markup(markup_text)
 
-# # Display parsed structure
-# import json
-# print(json.dumps(parsed_data, indent=2))
+# Display parsed structure
+#import json
+#print(json.dumps(parsed_data, indent=2))
 
-# Export the function
-__all__ = ['parse_markup']
