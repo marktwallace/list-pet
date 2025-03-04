@@ -5,6 +5,7 @@ from database import Database, get_database
 from parse import parse_markup
 import re
 import pandas as pd
+import json
 
 # Constants
 ASSISTANT_ROLE = "Assistant"
@@ -51,6 +52,44 @@ def is_sql_query(text: str) -> bool:
         r")\s*.*",
         text, re.IGNORECASE
     ))
+
+def is_command(text: str) -> tuple[bool, str | None]:
+    """Check if text is a system command and return (is_command, command_type)"""
+    text = text.strip().upper()
+    if text.startswith("DUMP "):
+        dump_type = text[5:].strip()
+        if dump_type in ["JSON", "EXAMPLE", "TRAIN"]:
+            return True, dump_type
+    return False, None
+
+def handle_command(command_type: str) -> str:
+    """Handle system commands and return the result text"""
+    # Make a deep copy to avoid side effects
+    messages = [msg.copy() for msg in st.session_state.messages]
+    
+    if command_type == "JSON":
+        # Create clean messages without modifying originals
+        clean_messages = []
+        for msg in messages:
+            clean_msg = {k: v for k, v in msg.items() if k != "dataframe"}
+            clean_messages.append(clean_msg)
+        return f"```json\n{json.dumps(clean_messages, indent=2)}\n```"
+    elif command_type == "EXAMPLE":
+        # Convert to example format (User/Assistant alternating format)
+        example = []
+        for msg in messages:
+            if msg["role"] == USER_ROLE:
+                content = msg["content"]
+                if content.startswith(f"{USER_ACTOR}: "):
+                    content = content[len(f"{USER_ACTOR}: "):]
+                example.append(f"Human: {content}")
+            elif msg["role"] == ASSISTANT_ROLE:
+                example.append(f"Assistant: {msg['content']}")
+        return "```\n" + "\n\n".join(example) + "\n```"
+    elif command_type == "TRAIN":
+        return "```\nTraining data dump format (placeholder)\n```"
+    
+    return "Invalid dump type"
 
 def execute_sql(query: str, db: Database) -> tuple[str, bool, pd.DataFrame | None]:
     """Execute SQL and return (formatted_result, had_error, dataframe)"""
@@ -143,15 +182,24 @@ def main():
         # Always show user input immediately
         st.session_state.messages.append({"role": USER_ROLE, "content": f"{USER_ACTOR}: {user_input}"})
         
-        # For SQL queries, show results immediately too
-        if is_sql_query(user_input):
+        # Check if it's a command first
+        is_cmd, cmd_type = is_command(user_input)
+        if is_cmd:
+            result = handle_command(cmd_type)
+            cmd_message = {"role": USER_ROLE, "content": f"System:\n{result}"}
+            st.session_state.messages.append(cmd_message)
+            st.rerun()
+        # Then check if it's SQL
+        elif is_sql_query(user_input):
             result, had_error, df = execute_sql(user_input, db)
             sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
             st.session_state.messages.append(sql_message)
-        
-        # Mark that we need an AI response and rerun to show the input and SQL result
-        st.session_state.needs_ai_response = True
-        st.rerun()
+            st.session_state.needs_ai_response = True
+            st.rerun()
+        else:
+            # Regular message, needs AI response
+            st.session_state.needs_ai_response = True
+            st.rerun()
     
     # Handle AI response if needed
     if st.session_state.needs_ai_response:
