@@ -134,16 +134,9 @@ def main():
     chat_engine = get_chat_engine("gpt-4o-mini")
     db = get_database()
     
-    # Create a container for the chat messages
-    chat_container = st.container()
-    
     # Display conversation history with user-friendly formatting
-    with chat_container:
-        for message in st.session_state.messages:
-            display_message(message)
-        
-        # Add an empty element at the bottom to scroll to
-        bottom_anchor = st.empty()
+    for message in st.session_state.messages:
+        display_message(message)
     
     # Handle new input
     if user_input := st.chat_input("Type your question here..."):
@@ -156,16 +149,19 @@ def main():
             sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
             st.session_state.messages.append(sql_message)
         
-        # Mark that we need an AI response
+        # Mark that we need an AI response and rerun to show the input and SQL result
         st.session_state.needs_ai_response = True
         st.rerun()
     
     # Handle AI response if needed
     if st.session_state.needs_ai_response:
-        response = chat_engine.generate_response(st.session_state.messages)
-        handle_ai_response(response, chat_engine, db)
-        st.session_state.needs_ai_response = False
-        st.rerun()
+        # Show thinking state
+        with st.chat_message(ASSISTANT_ROLE):
+            with st.spinner("Thinking..."):
+                response = chat_engine.generate_response(st.session_state.messages)
+                handle_ai_response(response, chat_engine, db)
+                st.session_state.needs_ai_response = False
+                st.rerun()
     
     # Scroll to bottom using JavaScript
     st.markdown("""
