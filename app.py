@@ -94,26 +94,6 @@ def display_message(message: dict):
             else:
                 st.markdown(content)
 
-def handle_message(message: str, chat_engine: ChatEngine, db: Database) -> None:
-    """Process a message and update conversation state"""
-    if is_sql_query(message):
-        # Direct SQL execution
-        result, had_error, df = execute_sql(message, db)
-        # Store raw SQL and result with dataframe
-        sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
-        st.session_state.messages.append(sql_message)
-        
-        if had_error:
-            # Let AI try to fix the error
-            response = chat_engine.generate_response(st.session_state.messages)
-            handle_ai_response(response, chat_engine, db)
-    else:
-        # Store raw user message
-        st.session_state.messages.append({"role": USER_ROLE, "content": f"{USER_ACTOR}: {message}"})
-        # Get AI response
-        response = chat_engine.generate_response(st.session_state.messages)
-        handle_ai_response(response, chat_engine, db)
-
 def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, retry_count: int = 0) -> None:
     """Process AI response, executing any SQL and handling errors"""
     # Store complete AI response with all markup
@@ -147,18 +127,52 @@ def main():
             first_message = f.read()
         st.session_state.messages.append({"role": ASSISTANT_ROLE, "content": first_message})
     
+    if "needs_ai_response" not in st.session_state:
+        st.session_state.needs_ai_response = False
+    
     # Setup chat engine and database
     chat_engine = get_chat_engine("gpt-4o-mini")
     db = get_database()
     
+    # Create a container for the chat messages
+    chat_container = st.container()
+    
     # Display conversation history with user-friendly formatting
-    for message in st.session_state.messages:
-        display_message(message)
+    with chat_container:
+        for message in st.session_state.messages:
+            display_message(message)
+        
+        # Add an empty element at the bottom to scroll to
+        bottom_anchor = st.empty()
     
     # Handle new input
     if user_input := st.chat_input("Type your question here..."):
-        handle_message(user_input, chat_engine, db)
+        # Always show user input immediately
+        st.session_state.messages.append({"role": USER_ROLE, "content": f"{USER_ACTOR}: {user_input}"})
+        
+        # For SQL queries, show results immediately too
+        if is_sql_query(user_input):
+            result, had_error, df = execute_sql(user_input, db)
+            sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
+            st.session_state.messages.append(sql_message)
+        
+        # Mark that we need an AI response
+        st.session_state.needs_ai_response = True
         st.rerun()
+    
+    # Handle AI response if needed
+    if st.session_state.needs_ai_response:
+        response = chat_engine.generate_response(st.session_state.messages)
+        handle_ai_response(response, chat_engine, db)
+        st.session_state.needs_ai_response = False
+        st.rerun()
+    
+    # Scroll to bottom using JavaScript
+    st.markdown("""
+        <script>
+            window.scrollTo(0, document.body.scrollHeight);
+        </script>
+        """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
