@@ -29,7 +29,17 @@ def is_sql_query(text: str) -> bool:
     """Check if text is SQL (either explicit <sql> tag or common SQL patterns)"""
     text = text.strip()
     return text.startswith("<sql>") or bool(re.match(
-        r"^\s*(SELECT|CREATE|DROP|ALTER|INSERT|DELETE|UPDATE|SHOW|DESCRIBE)\s+",
+        r"^\s*(?:"
+        r"SELECT\s+(?:\w+|\*)|"
+        r"CREATE\s+(?:TABLE|DATABASE|VIEW|INDEX)|"
+        r"DROP\s+(?:TABLE|DATABASE|VIEW|INDEX)|"
+        r"ALTER\s+(?:TABLE|DATABASE|VIEW)|"
+        r"INSERT\s+INTO|"
+        r"DELETE\s+FROM|"
+        r"UPDATE\s+\w+|"
+        r"SHOW\s+(?:TABLES|DATABASES|COLUMNS)|"
+        r"DESCRIBE\s+\w+"
+        r")\s*.*",
         text, re.IGNORECASE
     ))
 
