@@ -177,8 +177,8 @@ def main():
     for message in st.session_state.messages:
         display_message(message)
     
-    # Handle new input
-    if user_input := st.chat_input("Type your question here..."):
+    # Handle new input - use key parameter to control scrolling
+    if user_input := st.chat_input("Type your question here...", key=f"chat_input_{len(st.session_state.messages)}"):
         # Always show user input immediately
         st.session_state.messages.append({"role": USER_ROLE, "content": f"{USER_ACTOR}: {user_input}"})
         
@@ -210,13 +210,6 @@ def main():
                 handle_ai_response(response, chat_engine, db)
                 st.session_state.needs_ai_response = False
                 st.rerun()
-    
-    # Scroll to bottom using JavaScript
-    st.markdown("""
-        <script>
-            window.scrollTo(0, document.body.scrollHeight);
-        </script>
-        """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
