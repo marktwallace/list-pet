@@ -12,18 +12,27 @@ USER_ROLE = "User"
 USER_ACTOR = "User"
 DATABASE_ACTOR = "DuckDB"
 
-def format_sql_result(query: str, df: pd.DataFrame | None, error: str | None) -> str:
-    """Format SQL results in a consistent way"""
+def format_sql_result(query: str, df: pd.DataFrame | None, error: str | None) -> tuple[str, pd.DataFrame | None]:
+    """Format SQL results in a consistent way, returning both display text and dataframe"""
     output = []
     output.append(f"SQL Query:")
     output.append(f"```sql\n{query}\n```")
+    
     if error:
         output.append("Error:")
         output.append(f"```\n{error}\n```")
+        return "\n".join(output), None
     elif df is not None:
+        # Format for AI prompt using TSV
+        tsv_output = []
+        tsv_output.append("\t".join(df.columns))  # Headers
+        for _, row in df.iterrows():
+            tsv_output.append("\t".join(str(val) for val in row))
+        
         output.append("Result:")
-        output.append("```\n" + df.to_string(index=False) + "\n```")
-    return "\n".join(output)
+        output.append("```tsv\n" + "\n".join(tsv_output) + "\n```")
+        return "\n".join(output), df
+    return "\n".join(output), None
 
 def is_sql_query(text: str) -> bool:
     """Check if text is SQL (either explicit <sql> tag or common SQL patterns)"""
@@ -43,10 +52,11 @@ def is_sql_query(text: str) -> bool:
         text, re.IGNORECASE
     ))
 
-def execute_sql(query: str, db: Database) -> tuple[str, bool]:
-    """Execute SQL and return (formatted_result, had_error)"""
+def execute_sql(query: str, db: Database) -> tuple[str, bool, pd.DataFrame | None]:
+    """Execute SQL and return (formatted_result, had_error, dataframe)"""
     df, error = db.execute_query(query)
-    return format_sql_result(query, df, error), bool(error)
+    result, df = format_sql_result(query, df, error)
+    return result, bool(error), df
 
 def display_message(message: dict):
     """Display a message in user-friendly format"""
@@ -57,17 +67,41 @@ def display_message(message: dict):
             display_text = "\n\n".join(item["text"] for item in parsed.get("display", []))
             st.markdown(display_text)
         else:
-            # For user/database messages, display as is
-            st.markdown(message["content"])
+            # For user/database messages, split into parts
+            content = message["content"]
+            if message["content"].startswith(f"{DATABASE_ACTOR}:"):
+                # Extract query and result sections
+                parts = content.split("```")
+                st.markdown(f"```{parts[1]}```")  # Show SQL query
+                
+                if len(parts) > 3:  # If we have results
+                    if "Error:" in content:
+                        st.markdown(f"```{parts[3]}```")  # Show error
+                    else:
+                        # Get the dataframe from the message's metadata
+                        df = message.get("dataframe")
+                        if df is not None:
+                            st.dataframe(
+                                df,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    col: st.column_config.Column(
+                                        width="auto"
+                                    ) for col in df.columns
+                                }
+                            )
+            else:
+                st.markdown(content)
 
 def handle_message(message: str, chat_engine: ChatEngine, db: Database) -> None:
     """Process a message and update conversation state"""
     if is_sql_query(message):
         # Direct SQL execution
-        result, had_error = execute_sql(message, db)
-        # Store raw SQL and result
-        sql_message = f"{DATABASE_ACTOR}:\n{result}"
-        st.session_state.messages.append({"role": USER_ROLE, "content": sql_message})
+        result, had_error, df = execute_sql(message, db)
+        # Store raw SQL and result with dataframe
+        sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
+        st.session_state.messages.append(sql_message)
         
         if had_error:
             # Let AI try to fix the error
@@ -91,9 +125,10 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
     had_error = False
     for block in parsed.get("sql", []):
         if query := block.get("query"):
-            result, is_error = execute_sql(query, db)
+            result, is_error, df = execute_sql(query, db)
             # Store SQL results
-            st.session_state.messages.append({"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}"})
+            sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
+            st.session_state.messages.append(sql_message)
             had_error = had_error or is_error
     
     # If SQL error and haven't retried, let AI try again
