@@ -172,8 +172,7 @@ User:
 
 Assistant:
   <reasoning>
-    The user wants to import a CSV file, but I need the file path.
-    I should ask for clarification before executing any SQL.
+    The user wants to import a CSV file, but I need the file path from the user.
   </reasoning> 
   <display>
     I can help you import your playlist from a CSV file. 
@@ -188,6 +187,7 @@ User:
 Assistant:
   <reasoning>
     Now I have the file path, I can use DuckDB's read_csv function to import the data.
+    I won't know the columns in advance, so do a select * to learn about the data.
   </reasoning>
   <sql> 
     CREATE TABLE imported_songs AS 
@@ -257,24 +257,30 @@ User:
 
 Assistant:
   <reasoning>
-    User wants to visualize song length distribution by genre. A box plot would show the median, quartiles, and outliers.
+    User wants to visualize song length distribution by genre. 
+    A box plot would show the median, quartiles, and outliers.
+    Include the Name and Artist in the list of columns to select,
+    so the hover feature of the box plot will allow then to be displayed.
   </reasoning>
   <sql>
-    SELECT 
+    SELECT
+      Name,
+      Artist, 
       Genre,
       CAST(SPLIT_PART("Total Time", ':', 1) AS FLOAT) * 60 + 
       CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT) as duration_seconds
     FROM imported_songs;
   </sql>
-  <plot type="box">
-    x: Genre
-    y: duration_seconds
-    title: "Song Duration Distribution by Genre"
-    ylabel: "Duration (seconds)"
-    hover_data: ["Name", "Artist"]
-  </plot>
+  <plot 
+    type="box"
+    x="Genre" 
+    y="duration_seconds" 
+    title="Song Duration Distribution by Genre"
+    ylabel="Duration (seconds)"
+    hover_data="Name,Artist"
+  />
   <display>
-    Yes, here is a box plot of song duration by genre.
+    Here is a box plot of song duration by genre.
   </display>
 
 DuckDB:
