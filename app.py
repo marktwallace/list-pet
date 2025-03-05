@@ -63,16 +63,16 @@ def format_messages_example(messages: list, limit: int | None = None) -> str:
     for msg in messages:
         content = msg["content"]
         # Escape template variables and code blocks
-        content = (content
-                  .replace("{{", "{{{{")
-                  .replace("}}", "}}}}")
-                  .replace("```", "\`\`\`"))
+        # content = (content
+        #           .replace("{{", "{{{{")
+        #           .replace("}}", "}}}}")
+        #           .replace("```", "\`\`\`"))
         
         if msg["role"] == USER_ROLE:
             example.append(content)
         elif msg["role"] == ASSISTANT_ROLE:
             example.append(f"{ASSISTANT_ROLE}:\n{content}")
-    return "```\n" + "\n\n".join(example) + "\n```"
+    return "\n\n".join(example) + "\n"
 
 def is_command(text: str) -> tuple[bool, str | None]:
     """Check if text is a system command and return (is_command, command_type)"""
@@ -102,7 +102,7 @@ def handle_command(command_type: str) -> str:
         for msg in messages:
             clean_msg = {k: v for k, v in msg.items() if k != "dataframe"}
             clean_messages.append(clean_msg)
-        return f"```json\n{json.dumps(clean_messages, indent=2)}\n```"
+        return f"{json.dumps(clean_messages, indent=2)}"
     elif command_type == "EXAMPLE":
         return format_messages_example(messages)
     elif command_type == "TRAIN":
@@ -240,27 +240,34 @@ def main():
         "Type your question here...",
         key=f"chat_input_{len(st.session_state.messages)}"
     ):
-        # Always show user input immediately
-        st.session_state.messages.append({"role": USER_ROLE, "content": f"{USER_ACTOR}: {user_input}"})
-        
         # Check if it's a command first
         is_cmd, cmd_type = is_command(user_input)
         if is_cmd:
+            # All commands are diagnostic/utility - show output but don't add to state
             result = handle_command(cmd_type)
-            cmd_message = {"role": USER_ROLE, "content": f"System:\n{result}"}
-            st.session_state.messages.append(cmd_message)
-            st.rerun()
-        # Then check if it's SQL
-        elif is_sql_query(user_input):
-            result, had_error, df = execute_sql(user_input, db)
-            sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
-            st.session_state.messages.append(sql_message)
-            st.session_state.needs_ai_response = True
-            st.rerun()
+            # Show the command input and output without adding to state
+            with st.chat_message(USER_ROLE):
+                st.markdown(f"{USER_ACTOR}: {user_input}")
+            with st.expander("Command Output (not saved to conversation)", expanded=True):
+                # Use st.text() to show raw output for easy copying
+                st.text(result)  # Remove outer backticks since st.text adds its own monospace formatting
         else:
-            # Regular message, needs AI response
-            st.session_state.needs_ai_response = True
-            st.rerun()
+            # For non-commands, add to message history and show
+            with st.chat_message(USER_ROLE):
+                st.markdown(f"{USER_ACTOR}: {user_input}")
+            st.session_state.messages.append({"role": USER_ROLE, "content": f"{USER_ACTOR}: {user_input}"})
+            
+            # Then check if it's SQL
+            if is_sql_query(user_input):
+                result, had_error, df = execute_sql(user_input, db)
+                sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
+                st.session_state.messages.append(sql_message)
+                st.session_state.needs_ai_response = True
+                st.rerun()
+            else:
+                # Regular message, needs AI response
+                st.session_state.needs_ai_response = True
+                st.rerun()
     
     # Handle AI response if needed
     if st.session_state.needs_ai_response:
