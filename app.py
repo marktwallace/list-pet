@@ -66,12 +66,12 @@ def format_messages_example(messages: list, limit: int | None = None) -> str:
         content = (content
                   .replace("{{", "{{{{")
                   .replace("}}", "}}}}")
-                  .replace("```", "\\`\\`\\`"))
+                  .replace("```", "\`\`\`"))
         
         if msg["role"] == USER_ROLE:
             example.append(content)
         elif msg["role"] == ASSISTANT_ROLE:
-            example.append(f"{ASSISTANT_ROLE}: {content}")
+            example.append(f"{ASSISTANT_ROLE}:\n{content}")
     return "```\n" + "\n\n".join(example) + "\n```"
 
 def is_command(text: str) -> tuple[bool, str | None]:
@@ -236,7 +236,10 @@ def main():
         display_message(message)
     
     # Handle new input - use key parameter to control scrolling
-    if user_input := st.chat_input("Type your question here...", key=f"chat_input_{len(st.session_state.messages)}"):
+    if user_input := st.chat_input(
+        "Type your question here...",
+        key=f"chat_input_{len(st.session_state.messages)}"
+    ):
         # Always show user input immediately
         st.session_state.messages.append({"role": USER_ROLE, "content": f"{USER_ACTOR}: {user_input}"})
         
@@ -268,6 +271,28 @@ def main():
                 handle_ai_response(response, chat_engine, db)
                 st.session_state.needs_ai_response = False
                 st.rerun()
+    
+    # Add focus script at the end
+    import streamlit.components.v1 as components
+    components.html("""
+        <script>
+            // Function to focus the chat input
+            function focusChatInput() {
+                const doc = window.parent.document;  // break out of the Streamlit IFrame
+                const inputs = doc.querySelectorAll('textarea');
+                for (const input of inputs) {
+                    if (input.placeholder === 'Type your question here...') {
+                        input.focus();
+                        break;
+                    }
+                }
+            }
+            
+            // Call immediately and also after a short delay to ensure elements are loaded
+            focusChatInput();
+            setTimeout(focusChatInput, 100);
+        </script>
+    """, height=0, width=0)
 
 if __name__ == "__main__":
     main()
