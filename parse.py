@@ -3,9 +3,9 @@ import re
 from collections import defaultdict
 
 def parse_markup(text: str) -> dict:
-    """Parse the AI response into structured components (reasoning, sql, display)."""
+    """Parse the AI response into structured components (reasoning, sql, plot, display)."""
     
-    blocks = ["reasoning", "sql", "display"]
+    blocks = ["reasoning", "sql", "plot", "display"]
     components = {block: [] for block in blocks}
     
     current_tag = None
@@ -23,18 +23,21 @@ def parse_markup(text: str) -> dict:
                 current_content = []
             elif line == f"</{matched_block}>":
                 if current_content:
-                    components[matched_block].append(
-                        {"query" if matched_block == "sql" else "text": '\n'.join(current_content).strip()}
-                    )
+                    if matched_block == "plot":
+                        # Parse plot attributes into a dictionary
+                        plot_attrs = {}
+                        for attr_line in current_content:
+                            if ':' in attr_line:
+                                key, value = attr_line.split(':', 1)
+                                plot_attrs[key.strip()] = value.strip()
+                        components[matched_block].append(plot_attrs)
+                    else:
+                        components[matched_block].append(
+                            {"query" if matched_block == "sql" else "text": '\n'.join(current_content).strip()}
+                        )
                 current_tag = None
         elif current_tag:
             current_content.append(line)
-
-    # Ensure unclosed tags still get included
-    if current_tag and current_content:
-        components[current_tag].append(
-            {"query" if current_tag == "sql" else "text": '\n'.join(current_content).strip()}
-        )
 
     return components
 
