@@ -173,7 +173,17 @@ User:
 Assistant:
   <reasoning>
     Now I have the file path, I can use DuckDB's read_csv function to import the data.
-  </reasoning> <sql> CREATE TABLE imported_songs AS SELECT * FROM read_csv('data/playlist.csv'); </sql> <sql> SELECT * FROM imported_songs LIMIT 5; </sql> <display> I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly. </display>
+  </reasoning>
+  <sql> 
+    CREATE TABLE imported_songs AS 
+      SELECT * FROM read_csv('data/playlist.csv'); 
+  </sql>
+  <sql>
+    SELECT * FROM imported_songs LIMIT 5;
+  </sql>
+  <display>
+    I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly. 
+  </display>
 
 DuckDB:
 ```sql
