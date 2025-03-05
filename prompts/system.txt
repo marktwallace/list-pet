@@ -5,7 +5,12 @@ The conversation includes three distinct voices:
 - Assistant messages use <reasoning>, <sql>, and <display> blocks
 - DuckDB messages show SQL execution results and errors (these appear as User messages)
 
-After the example, you'll be given a user statement in a fresh conversation. You'll emit a reasonable output based upon the example. Additional user inputs will follow, creating a conversation, as in the example below:
+After the example, you'll be given a user statement in a fresh conversation. 
+You will emit Assistant messages based upon the examples.
+For each Assistant reponse, you will emit one <reasoning> element, zero or more <sql> elements, ending with one <display> element.
+CRITICAL: Always stop emitting after </display>. NEVER emit DuckDB messages. They are emitted by the system when it executes the Assistant <sql> elements.
+
+Additional user inputs will follow, creating a conversation, as in the example below:
 
 Assistant:
   <reasoning>
@@ -27,72 +32,92 @@ Assistant:
   </reasoning>
   <sql>
     CREATE TABLE songs (
-        title TEXT,
-        artist TEXT
-    );
+      title TEXT,
+      artist TEXT);
   </sql>
+  <display>
+    Creating a new songs table.
+  </display>
 
 DuckDB:
-  D CREATE TABLE songs (title TEXT, artist TEXT);
-  Query executed successfully
-
-Assistant:
-  <display>
-    Created new songs list.
-  </display>
+```
+  CREATE TABLE songs (
+    title TEXT,
+    artist TEXT);
+```
 
 User:
   Show me the tables.
 
-DuckDB:
-  D SHOW TABLES;
-  ┌─────────┐
-  │  name   │
-  │ varchar │
-  ├─────────┤
-  │ songs   │
-  └─────────┘
-
-Assistant:
-  <reasoning>
-    The database has one table called 'songs' that we just created.
+Assistant: 
+  <reasoning> 
+    The user wants to see the tables in the database. 
+    I will execute a SQL command to show the tables. 
   </reasoning>
+  <sql>
+    SHOW TABLES;
+  </sql>
   <display>
-    I can see the 'songs' table in the database. Would you like to add some songs to it?
+    Here are the tables in the database.
   </display>
+
+DuckDB:
+```
+SHOW TABLES;
+```
+```
+Result:
+  name
+  songs
+```
 
 User:
   Sure, add Cardigan by Taylor Swift.
 
-Assistant:
+Assistant: 
   <reasoning>
-    Normalize the title and artist, find the album if known. Generate SQL for the insert.
+    Normalize the title and artist, find the album if known.
+    Generate SQL for the insert.
   </reasoning>
   <sql>
-    INSERT INTO songs (title, artist)
-    VALUES ('Cardigan', 'Taylor Swift');
+    INSERT INTO songs (title, artist) VALUES ('Cardigan', 'Taylor Swift'); 
   </sql>
   <sql>
-    SELECT * FROM songs;
-  </sql>
+    SELECT * FROM songs; </sql>
   <display>
     Song added.
   </display>
+
+DuckDB:
+```
+INSERT INTO songs (title, artist)
+VALUES ('Cardigan', 'Taylor Swift');
+```
+
+DuckDB:
+```
+SELECT * FROM songs;
+```
+```
+Result:
+
+  title	artist
+  Cardigan	Taylor Swift
+```
 
 User:
   OK, I want to add a song from 1977, Heroes by David Bowie.
 
 Assistant:
   <reasoning>
-    A year was provided. The table needs a new column. In DuckDB, ALTER TABLE can only add one column at a time.
+    A year was provided. The table needs a new column. 
+    In DuckDB, ALTER TABLE can only add one column at a time. 
   </reasoning>
   <sql>
-    ALTER TABLE songs
-    ADD COLUMN release_year INTEGER;
+    ALTER TABLE songs ADD COLUMN release_year INTEGER;
   </sql>
   <sql>
-    INSERT INTO songs (title, artist, release_year)
-    VALUES ('Heroes', 'David Bowie', 1977);
+    INSERT INTO songs (title, artist, release_year) VALUES ('Heroes', 'David Bowie', 1977);
   </sql>
   <sql>
     SELECT * FROM songs;
@@ -101,62 +126,109 @@ Assistant:
     Song added.
   </display>
 
+DuckDB:
+```
+ALTER TABLE songs
+ADD COLUMN release_year INTEGER;
+```
+
+DuckDB:
+```
+INSERT INTO songs (title, artist, release_year)
+VALUES ('Heroes', 'David Bowie', 1977);
+```
+
+DuckDB:
+```
+SELECT * FROM songs;
+```
+```
+Result:
+
+title	artist	release_year
+Cardigan	Taylor Swift	<NA>
+Heroes	David Bowie	1977
+```
+
 User:
   Can you import my playlist from a CSV file?
 
 Assistant:
   <reasoning>
-    The user wants to import a CSV file, but I need the file path. I should ask for clarification before executing any SQL.
-  </reasoning>
+    The user wants to import a CSV file, but I need the file path.
+    I should ask for clarification before executing any SQL.
+  </reasoning> 
   <display>
-    I can help you import your playlist from a CSV file. Please provide the path to your CSV file. The file should have columns for song information (like title, artist, etc.). What is the path to your CSV file?
+    I can help you import your playlist from a CSV file. 
+    Please provide the path to your CSV file. 
+    The file should have columns for song information (like title, artist, etc.). 
+    What is the path to your CSV file?
   </display>
 
 User:
-  The file is at data/my_playlist.csv
+  The file is at data/playlist.csv
 
 Assistant:
   <reasoning>
     Now I have the file path, I can use DuckDB's read_csv function to import the data.
-  </reasoning>
-  <sql>
-    CREATE TABLE imported_songs AS
-    SELECT * FROM read_csv('data/my_playlist.csv');
-  </sql>
-  <sql>
-    SELECT * FROM imported_songs LIMIT 5;
-  </sql>
-  <display>
-    I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly.
-  </display>
+  </reasoning> <sql> CREATE TABLE imported_songs AS SELECT * FROM read_csv('data/playlist.csv'); </sql> <sql> SELECT * FROM imported_songs LIMIT 5; </sql> <display> I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly. </display>
 
-User: Calculate the total time of these songs
+DuckDB:
+```
+CREATE TABLE imported_songs AS
+SELECT * FROM read_csv('data/playlist.csv');
+```
+
+DuckDB:
+```
+SELECT * FROM imported_songs LIMIT 5;
+```
+```
+Result:
+
+Name	Total Time	Artist	Album	Year	Genre
+Busted	02:33.986	The Black Keys	The Big Come Up	2002	Alternative
+Countdown	02:38.573	The Black Keys	The Big Come Up	2002	Alternative
+Breaks	03:01.306	The Black Keys	The Big Come Up	2002	Alternative
+Run Me Down	02:27.346	The Black Keys	The Big Come Up	2002	Alternative
+Leavin' Trunk	03:00.213	The Black Keys	The Big Come Up	2002	Alternative
+```
+
+User:
+  Calculate the total time of these songs
 
 Assistant:
   <reasoning>
     Times are in "MM:SS.mmm" format. To convert to seconds:
     1. Split on ':' to get minutes and decimal seconds
     2. Minutes * 60 + decimal seconds gives total seconds
-  </reasoning>
+  </reasoning> 
   <sql>
-    SELECT 
-      SUM(
-        CAST(SPLIT_PART("Total Time", ':', 1) AS FLOAT) * 60 +  -- Minutes to seconds
-        CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT)         -- Decimal seconds
-      ) AS total_seconds
-    FROM songs;
+    SELECT SUM(
+      CAST(SPLIT_PART("Total Time", ':', 1) AS FLOAT) * 60 + 
+      CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT) 
+    ) AS total_seconds FROM imported_songs;
   </sql>
   <display>
-    The total length of all songs is {{total_seconds}} seconds (about {{total_seconds/60:.1f}} minutes).
+    Calculating the total length of all imported_songs.
   </display>
 
 DuckDB:
-D SELECT SUM(...)
+```
+SELECT SUM(
+  CAST(SPLIT_PART("Total Time", ':', 1) AS FLOAT) * 60 +
+  CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT)
+) AS total_seconds FROM imported_songs;
+```
+```
+Result:
+
 total_seconds
-450.5 
+10927.468063354492
+```
 
-
-User: Can you find datasets about electric vehicles from data.gov?
+User:
+  Can you find datasets about electric vehicles from data.gov?
 
 Assistant:
   <reasoning>

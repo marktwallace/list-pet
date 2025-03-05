@@ -16,7 +16,6 @@ DATABASE_ACTOR = "DuckDB"
 def format_sql_result(query: str, df: pd.DataFrame | None, error: str | None) -> tuple[str, pd.DataFrame | None]:
     """Format SQL results in a consistent way, returning both display text and dataframe"""
     output = []
-    output.append(f"SQL Query:")
     output.append(f"```sql\n{query}\n```")
     
     if error:
@@ -53,6 +52,28 @@ def is_sql_query(text: str) -> bool:
         text, re.IGNORECASE
     ))
 
+def format_messages_example(messages: list, limit: int | None = None) -> str:
+    """Format messages in example format, optionally limiting to last N messages"""
+    # If limit is specified, take only the last N messages
+    if limit is not None:
+        messages = messages[-limit:]
+    
+    # Convert to example format (User/Assistant alternating format)
+    example = []
+    for msg in messages:
+        content = msg["content"]
+        # Escape template variables and code blocks
+        content = (content
+                  .replace("{{", "{{{{")
+                  .replace("}}", "}}}}")
+                  .replace("```", "\\`\\`\\`"))
+        
+        if msg["role"] == USER_ROLE:
+            example.append(content)
+        elif msg["role"] == ASSISTANT_ROLE:
+            example.append(f"{ASSISTANT_ROLE}: {content}")
+    return "```\n" + "\n\n".join(example) + "\n```"
+
 def is_command(text: str) -> tuple[bool, str | None]:
     """Check if text is a system command and return (is_command, command_type)"""
     text = text.strip().upper()
@@ -60,6 +81,14 @@ def is_command(text: str) -> tuple[bool, str | None]:
         dump_type = text[5:].strip()
         if dump_type in ["JSON", "EXAMPLE", "TRAIN"]:
             return True, dump_type
+        # Check for DUMP -N pattern
+        if dump_type.startswith("-"):
+            try:
+                n = int(dump_type[1:])
+                if n > 0:
+                    return True, dump_type
+            except ValueError:
+                pass
     return False, None
 
 def handle_command(command_type: str) -> str:
@@ -75,19 +104,16 @@ def handle_command(command_type: str) -> str:
             clean_messages.append(clean_msg)
         return f"```json\n{json.dumps(clean_messages, indent=2)}\n```"
     elif command_type == "EXAMPLE":
-        # Convert to example format (User/Assistant alternating format)
-        example = []
-        for msg in messages:
-            if msg["role"] == USER_ROLE:
-                content = msg["content"]
-                if content.startswith(f"{USER_ACTOR}: "):
-                    content = content[len(f"{USER_ACTOR}: "):]
-                example.append(f"Human: {content}")
-            elif msg["role"] == ASSISTANT_ROLE:
-                example.append(f"Assistant: {msg['content']}")
-        return "```\n" + "\n\n".join(example) + "\n```"
+        return format_messages_example(messages)
     elif command_type == "TRAIN":
         return "```\nTraining data dump format (placeholder)\n```"
+    elif command_type.startswith("-"):
+        try:
+            n = int(command_type[1:])
+            if n > 0:
+                return format_messages_example(messages, n)
+        except ValueError:
+            pass
     
     return "Invalid dump type"
 
@@ -96,6 +122,29 @@ def execute_sql(query: str, db: Database) -> tuple[str, bool, pd.DataFrame | Non
     df, error = db.execute_query(query)
     result, df = format_sql_result(query, df, error)
     return result, bool(error), df
+
+def format_sql_label(sql: str, max_length: int = 45) -> str:
+    """Format SQL query into a concise label for the expander.
+    Takes the first line or first few words of the SQL query."""
+    # Remove any leading/trailing whitespace and 'sql' language marker
+    sql = sql.strip().replace('sql\n', '').strip()
+    
+    # Account for "SQL: " prefix (5 chars) and "..." suffix (3 chars)
+    effective_length = max_length - 8
+    
+    # Try to get first line
+    first_line = sql.split('\n')[0].strip()
+    
+    # If it's too long or empty, take first few words
+    if len(first_line) > effective_length or not first_line:
+        words = sql.split()
+        label = ' '.join(words[:4])
+        if len(label) > effective_length:
+            label = label[:effective_length]
+    else:
+        label = first_line[:effective_length]
+    
+    return f"SQL: {label}..."
 
 def display_message(message: dict):
     """Display a message in user-friendly format"""
@@ -106,30 +155,39 @@ def display_message(message: dict):
             display_text = "\n\n".join(item["text"] for item in parsed.get("display", []))
             st.markdown(display_text)
         else:
-            # For user/database messages, split into parts
+            # For user/database messages
             content = message["content"]
-            if message["content"].startswith(f"{DATABASE_ACTOR}:"):
-                # Extract query and result sections
-                parts = content.split("```")
-                st.markdown(f"```{parts[1]}```")  # Show SQL query
+            if content.startswith(f"{DATABASE_ACTOR}:"):
+                # Find SQL query and result sections using regex to be more robust
+                import re
                 
-                if len(parts) > 3:  # If we have results
-                    if "Error:" in content:
-                        st.markdown(f"```{parts[3]}```")  # Show error
-                    else:
-                        # Get the dataframe from the message's metadata
-                        df = message.get("dataframe")
-                        if df is not None:
-                            st.dataframe(
-                                df,
-                                use_container_width=True,
-                                hide_index=True,
-                                column_config={
-                                    col: st.column_config.Column(
-                                        width="auto"
-                                    ) for col in df.columns
-                                }
-                            )
+                # Extract SQL query
+                sql_match = re.search(r"```(?:sql)?\s*\n?(.*?)\n?```", content, re.DOTALL)
+                if sql_match:
+                    sql_query = sql_match.group(1).strip()
+                    # Show SQL query in an expander
+                    with st.expander(format_sql_label(sql_query)):
+                        st.markdown(f"```sql\n{sql_query}\n```")
+                
+                # Extract results or error
+                if "Error:" in content:
+                    error_match = re.search(r"Error:.*?```(.*?)```", content, re.DOTALL)
+                    if error_match:
+                        st.markdown(f"```\n{error_match.group(1).strip()}\n```")
+                else:
+                    # Get the dataframe from the message's metadata
+                    df = message.get("dataframe")
+                    if df is not None:
+                        st.dataframe(
+                            df,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                col: st.column_config.Column(
+                                    width="auto"
+                                ) for col in df.columns
+                            }
+                        )
             else:
                 st.markdown(content)
 
