@@ -5,6 +5,10 @@ The conversation includes three distinct voices:
 - Assistant messages use <reasoning>, <sql>, and <display> blocks
 - DuckDB messages show SQL execution results and errors (these appear as User messages)
 
+SQL guidelines:
+DuckDB does not support transactions or relational integrity constraints. 
+DuckDB prefers bulk inserts where possible.
+
 After the example, you'll be given a user statement in a fresh conversation. 
 You will emit Assistant messages based upon the examples.
 For each Assistant reponse, you will emit one <reasoning> element, zero or more <sql> elements, ending with one <display> element.
@@ -40,7 +44,7 @@ Assistant:
   </display>
 
 DuckDB:
-```
+```sql
   CREATE TABLE songs (
     title TEXT,
     artist TEXT);
@@ -62,11 +66,11 @@ Assistant:
   </display>
 
 DuckDB:
-```
+```sql
 SHOW TABLES;
 ```
-```
 Result:
+```tsv
   name
   songs
 ```
@@ -89,18 +93,17 @@ Assistant:
   </display>
 
 DuckDB:
-```
+```sql
 INSERT INTO songs (title, artist)
 VALUES ('Cardigan', 'Taylor Swift');
 ```
 
 DuckDB:
-```
+```sql
 SELECT * FROM songs;
 ```
-```
 Result:
-
+```tsv
   title	artist
   Cardigan	Taylor Swift
 ```
@@ -127,24 +130,23 @@ Assistant:
   </display>
 
 DuckDB:
-```
+```sql
 ALTER TABLE songs
 ADD COLUMN release_year INTEGER;
 ```
 
 DuckDB:
-```
+```sql
 INSERT INTO songs (title, artist, release_year)
 VALUES ('Heroes', 'David Bowie', 1977);
 ```
 
 DuckDB:
-```
+```sql
 SELECT * FROM songs;
 ```
-```
 Result:
-
+```tsv
 title	artist	release_year
 Cardigan	Taylor Swift	<NA>
 Heroes	David Bowie	1977
@@ -174,18 +176,17 @@ Assistant:
   </reasoning> <sql> CREATE TABLE imported_songs AS SELECT * FROM read_csv('data/playlist.csv'); </sql> <sql> SELECT * FROM imported_songs LIMIT 5; </sql> <display> I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly. </display>
 
 DuckDB:
-```
+```sql
 CREATE TABLE imported_songs AS
 SELECT * FROM read_csv('data/playlist.csv');
 ```
 
 DuckDB:
-```
+```sql
 SELECT * FROM imported_songs LIMIT 5;
 ```
-```
 Result:
-
+```tsv
 Name	Total Time	Artist	Album	Year	Genre
 Busted	02:33.986	The Black Keys	The Big Come Up	2002	Alternative
 Countdown	02:38.573	The Black Keys	The Big Come Up	2002	Alternative
@@ -214,15 +215,14 @@ Assistant:
   </display>
 
 DuckDB:
-```
+```sql
 SELECT SUM(
   CAST(SPLIT_PART("Total Time", ':', 1) AS FLOAT) * 60 +
   CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT)
 ) AS total_seconds FROM imported_songs;
 ```
-```
 Result:
-
+```tsv
 total_seconds
 10927.468063354492
 ```
