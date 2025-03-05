@@ -1,41 +1,67 @@
-import xml.etree.ElementTree as ET
 import re
-from collections import defaultdict
 
 def parse_markup(text: str) -> dict:
-    """Parse the AI response into structured components (reasoning, sql, plot, display)."""
+    """Parse the AI response into structured components using regex parsing."""
     
     blocks = ["reasoning", "sql", "plot", "display"]
     components = {block: [] for block in blocks}
     
     current_tag = None
     current_content = []
+    in_plot_tag = False
+    plot_lines = []
 
     for line in text.split('\n'):
         line = line.strip()
-
-        # Check for opening and closing tags dynamically
-        matched_block = next((block for block in blocks if line == f"<{block}>" or line == f"</{block}>"), None)
-
-        if matched_block:
-            if line == f"<{matched_block}>":
-                current_tag = matched_block
+        if not line:
+            continue
+            
+        # Handle multiline plot tags
+        if line.startswith('<plot'):
+            in_plot_tag = True
+            plot_lines = [line]
+            continue
+        elif in_plot_tag:
+            plot_lines.append(line)
+            if line.endswith('/>'):
+                # Process complete plot tag
+                in_plot_tag = False
+                full_plot_tag = ' '.join(plot_lines)
+                
+                # Parse the complete plot tag
+                plot_match = re.match(r'<plot(.*?)>', full_plot_tag)
+                if plot_match:
+                    attrs = plot_match.group(1).strip()
+                    plot_attrs = {}
+                    # Split on spaces, but respect quoted values
+                    attr_pattern = r'(\w+)="([^"]*)"'
+                    for attr_match in re.finditer(attr_pattern, attrs):
+                        key, value = attr_match.groups()
+                        if key == 'hover_data':
+                            # Convert comma-separated hover columns to list
+                            plot_attrs[key] = [col.strip() for col in value.split(',')]
+                        else:
+                            plot_attrs[key] = value
+                    components['plot'].append(plot_attrs)
+            continue
+            
+        # Handle other tags
+        opening_match = re.match(r'<(\w+)>', line)
+        closing_tag = next((f"</{block}>" for block in blocks if line == f"</{block}>"), None)
+        
+        if opening_match:
+            block_type = opening_match.group(1)
+            if block_type in blocks and block_type != 'plot':
+                current_tag = block_type
                 current_content = []
-            elif line == f"</{matched_block}>":
-                if current_content:
-                    if matched_block == "plot":
-                        # Parse plot attributes into a dictionary
-                        plot_attrs = {}
-                        for attr_line in current_content:
-                            if ':' in attr_line:
-                                key, value = attr_line.split(':', 1)
-                                plot_attrs[key.strip()] = value.strip()
-                        components[matched_block].append(plot_attrs)
-                    else:
-                        components[matched_block].append(
-                            {"query" if matched_block == "sql" else "text": '\n'.join(current_content).strip()}
-                        )
-                current_tag = None
+                
+        elif closing_tag:
+            block_type = closing_tag[2:-1]  # Remove </> from tag
+            if current_content and block_type != "plot":  # Skip plot closing tags
+                components[block_type].append(
+                    {"query" if block_type == "sql" else "text": '\n'.join(current_content).strip()}
+                )
+            current_tag = None
         elif current_tag:
             current_content.append(line)
 

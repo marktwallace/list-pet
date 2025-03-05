@@ -6,6 +6,7 @@ from parse import parse_markup
 import re
 import pandas as pd
 import json
+from plotting import get_plotter
 
 # Constants
 ASSISTANT_ROLE = "Assistant"
@@ -150,10 +151,28 @@ def display_message(message: dict):
     """Display a message in user-friendly format"""
     with st.chat_message(message["role"]):
         if message["role"] == ASSISTANT_ROLE:
-            # For assistant messages, parse and display only display blocks
+            # For assistant messages, parse and display blocks
             parsed = parse_markup(message["content"])
+            print("DEBUG - Display parsed message:", parsed)
+            
+            # Display text from display blocks
             display_text = "\n\n".join(item["text"] for item in parsed.get("display", []))
             st.markdown(display_text)
+            
+            # Re-create plots if we have the dataframe from the last SQL result
+            last_sql_message = next(
+                (msg for msg in reversed(st.session_state.messages) 
+                 if msg["role"] == USER_ROLE and 
+                 msg["content"].startswith(f"{DATABASE_ACTOR}:") and
+                 "dataframe" in msg),
+                None
+            )
+            print("DEBUG - Last SQL message found:", bool(last_sql_message))
+            if last_sql_message and "dataframe" in last_sql_message:
+                plotter = get_plotter()
+                print("DEBUG - Plot blocks in display:", parsed.get("plot", []))
+                for plot_spec in parsed.get("plot", []):
+                    plotter.create_plot(plot_spec, last_sql_message["dataframe"])
         else:
             # For user/database messages
             content = message["content"]
@@ -197,6 +216,9 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
     st.session_state.messages.append({"role": ASSISTANT_ROLE, "content": response})
     
     parsed = parse_markup(response)
+    print("DEBUG - Parsed response:", parsed)
+    
+    last_df = None  # Keep track of the last dataframe for plots
     
     # Execute any SQL blocks
     had_error = False
@@ -207,6 +229,16 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
             sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
             st.session_state.messages.append(sql_message)
             had_error = had_error or is_error
+            if df is not None:
+                last_df = df
+    
+    # Handle any plot blocks
+    if last_df is not None:
+        plotter = get_plotter()
+        print("DEBUG - Plot blocks:", parsed.get("plot", []))
+        print("DEBUG - DataFrame available:", last_df is not None)
+        for plot_spec in parsed.get("plot", []):
+            plotter.create_plot(plot_spec, last_df)
     
     # If SQL error and haven't retried, let AI try again
     if had_error and retry_count == 0:
