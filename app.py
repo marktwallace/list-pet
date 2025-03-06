@@ -237,22 +237,37 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
             had_error = had_error or is_error
             if df is not None:
                 last_df = df
+                print(f"DEBUG - SQL result dataframe: {df.shape}, columns: {df.columns.tolist()}")
     
     # Handle any plot blocks - this is the ONLY place where plots are created
     if last_df is not None and parsed.get("plot", []):
+        print(f"DEBUG - Found {len(parsed.get('plot', []))} plot specifications to process")
         plotter = get_plotter()
         for i, plot_spec in enumerate(parsed.get("plot", [])):
+            print(f"DEBUG - Processing plot {i+1}/{len(parsed.get('plot', []))}: {plot_spec}")
             try:
                 # Create the plot
                 fig, error = plotter.create_plot(plot_spec, last_df)
                 
                 if error:
                     # Handle plot creation error
-                    plot_error = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{error}", "dataframe": last_df}
+                    print(f"DEBUG - Plot creation error: {error}")
+                    
+                    # Create a more user-friendly error message that includes the original plot spec
+                    plot_type = plot_spec.get('type', 'unknown')
+                    error_content = f"{DATABASE_ACTOR}:\n\n**Error creating {plot_type} plot:**\n```\n{error}\n```\n\nPlot specification:\n```json\n{json.dumps(plot_spec, indent=2)}\n```"
+                    
+                    # Add the error message to the conversation
+                    plot_error = {"role": USER_ROLE, "content": error_content, "dataframe": last_df}
                     st.session_state.messages.append(plot_error)
+                    
+                    # Display the error in the UI
+                    with st.chat_message(USER_ROLE):
+                        st.markdown(error_content)
                 elif fig:
                     # Generate a unique message ID for this plot
                     plot_msg_id = f"plot_{len(st.session_state.messages)}_{i}"
+                    print(f"DEBUG - Plot created successfully with ID: {plot_msg_id}")
                     
                     # Store the figure object directly in the message
                     plot_message = {
@@ -269,13 +284,43 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                     
                     # Display the plot with the unique ID
                     st.plotly_chart(fig, use_container_width=True, key=plot_msg_id)
+                    print(f"DEBUG - Plot displayed with key: {plot_msg_id}")
+                else:
+                    print("DEBUG - No figure and no error returned from create_plot")
             except Exception as e:
                 # Handle any unexpected errors
                 error_msg = f"Error creating plot: {str(e)}"
-                st.error(error_msg)
                 print(f"DEBUG - Plot error: {str(e)}")
-                plot_error = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{error_msg}", "dataframe": last_df}
+                import traceback
+                traceback_str = traceback.format_exc()
+                print(f"DEBUG - Plot error traceback: {traceback_str}")
+                
+                # Create a more user-friendly error message
+                plot_type = plot_spec.get('type', 'unknown')
+                error_content = f"{DATABASE_ACTOR}:\n\n**Error creating {plot_type} plot:**\n```\n{error_msg}\n```\n\nPlot specification:\n```json\n{json.dumps(plot_spec, indent=2)}\n```"
+                
+                # Add the error message to the conversation
+                plot_error = {"role": USER_ROLE, "content": error_content, "dataframe": last_df}
                 st.session_state.messages.append(plot_error)
+                
+                # Display the error in the UI
+                with st.chat_message(USER_ROLE):
+                    st.markdown(error_content)
+    elif parsed.get("plot", []):
+        print("DEBUG - Plot specifications found but no dataframe available")
+        
+        # Create an error message for missing dataframe
+        error_content = f"{DATABASE_ACTOR}:\n\n**Error creating plot:**\n```\nNo data available for plotting. Please run a SQL query first.\n```"
+        
+        # Add the error message to the conversation
+        plot_error = {"role": USER_ROLE, "content": error_content}
+        st.session_state.messages.append(plot_error)
+        
+        # Display the error in the UI
+        with st.chat_message(USER_ROLE):
+            st.markdown(error_content)
+    elif last_df is not None:
+        print("DEBUG - Dataframe available but no plot specifications found")
     
     # If SQL error and haven't retried, let AI try again
     if had_error and retry_count == 0:
