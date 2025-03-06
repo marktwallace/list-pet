@@ -6,6 +6,7 @@ from parse import parse_markup
 import re
 import pandas as pd
 import json
+from datetime import datetime
 from plotting import get_plotter
 import plotly.express as px
 
@@ -76,27 +77,41 @@ def format_messages_example(messages: list, limit: int | None = None) -> str:
             example.append(f"{ASSISTANT_ROLE}:\n{content}")
     return "\n\n".join(example) + "\n"
 
-def is_command(text: str) -> tuple[bool, str | None]:
-    """Check if text is a system command and return (is_command, command_type)"""
+def is_command(text: str) -> tuple[bool, str | None, str | None]:
+    """Check if text is a system command and return (is_command, command_type, filename_stem)"""
     text = text.strip().upper()
     if text.startswith("DUMP "):
-        dump_type = text[5:].strip()
+        parts = text[5:].strip().split()
+        dump_type = parts[0]
+        filename_stem = parts[1] if len(parts) > 1 else None
+        
         if dump_type in ["JSON", "EXAMPLE", "TRAIN"]:
-            return True, dump_type
+            return True, dump_type, filename_stem
         # Check for DUMP -N pattern
         if dump_type.startswith("-"):
             try:
                 n = int(dump_type[1:])
-                if n > 0:
-                    return True, dump_type
+                return True, dump_type, filename_stem
             except ValueError:
                 pass
-    return False, None
+    return False, None, None
 
-def handle_command(command_type: str) -> str:
+def handle_command(command_type: str, command_label: str | None) -> str:
     """Handle system commands and return the result text"""
     # Make a deep copy to avoid side effects
     messages = [msg.copy() for msg in st.session_state.messages]
+
+    def dump_file_name(command_type: str, stem: str | None = None) -> str:
+        dump_dir = "dumps"
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        stem = (stem or "dump") + "_" + command_type + "_" + now
+        extension = ".json" if command_type == "JSON" else ".txt"
+        return dump_dir + "/" + stem + extension
+    
+    def write_dump_file(dump: str, command_type: str, stem: str | None = None):
+        filename = dump_file_name(command_type, stem) 
+        with open(filename, "w") as f:
+            f.write(dump)
     
     if command_type == "JSON":
         # Create clean messages without modifying originals
@@ -104,16 +119,23 @@ def handle_command(command_type: str) -> str:
         for msg in messages:
             clean_msg = {k: v for k, v in msg.items() if k != "dataframe"}
             clean_messages.append(clean_msg)
-        return f"{json.dumps(clean_messages, indent=2)}"
+        dump = json.dumps(clean_messages, indent=2)
+        write_dump_file(dump, command_type, command_label)
+        return f"{dump}"
     elif command_type == "EXAMPLE":
-        return format_messages_example(messages)
+        dump = format_messages_example(messages)
+        write_dump_file(dump, command_type, command_label)
+        return f"{dump}"
     elif command_type == "TRAIN":
         return "```\nTraining data dump format (placeholder)\n```"
     elif command_type.startswith("-"):
         try:
             n = int(command_type[1:])
-            if n > 0:
-                return format_messages_example(messages, n)
+            if not n > 0:
+                n = None
+            dump = format_messages_example(messages, n)
+            write_dump_file(dump, command_type, command_label)
+            return f"{dump}"
         except ValueError:
             pass
     
@@ -355,10 +377,10 @@ def main():
         key=f"chat_input_{len(st.session_state.messages)}"
     ):
         # Check if it's a command first
-        is_cmd, cmd_type = is_command(user_input)
+        is_cmd, cmd_type, cmd_label = is_command(user_input)
         if is_cmd:
             # All commands are diagnostic/utility - show output but don't add to state
-            result = handle_command(cmd_type)
+            result = handle_command(cmd_type, cmd_label)
             # Show the command input and output without adding to state
             with st.chat_message(USER_ROLE):
                 st.markdown(f"{USER_ACTOR}: {user_input}")
