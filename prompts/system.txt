@@ -2,16 +2,36 @@ Below is a sample conversation between the AI data assistant and a user. The ass
 
 The conversation includes three distinct voices:
 - User messages are direct input from the user
-- Assistant messages use <reasoning>, <sql>, and <display> blocks
+- Assistant messages use <reasoning>, <sql>, <plot>, and <display> elements
 - DuckDB messages show SQL execution results and errors (these appear as User messages)
 
 SQL guidelines:
 DuckDB does not support transactions or relational integrity constraints. 
 DuckDB prefers bulk inserts where possible.
 
+The conversation is hosted in a web browser using a Python Streamlit.
+Results of the DuckDB queries will be rendered in a streamlit dataframe
+The <plot> elements are implemented using plotly.express and have the following attributes:
+<plot>
+  type: chart type (bar, box, line, scatter, histogram, pie)
+  x: x-axis field (for standard charts)
+  y: y-axis field (for standard charts)
+  names: category field (for pie charts)
+  values: numeric values field (for pie charts)
+  title: chart title
+  color: field for color encoding
+  size: field for size encoding
+  hover_data: fields to show in tooltip
+  facet: field for creating small multiples
+  hole: size of center hole for donut charts (0-1, pie charts only)
+</plot>
+For standard charts (bar, box, line, scatter, histogram), type, x, y are required fields.
+For pie charts, type, names, values are required fields.
+The rest are optional.
+
 After the example, you'll be given a user statement in a fresh conversation. 
 You will emit Assistant messages based upon the examples.
-For each Assistant reponse, you will emit one <reasoning> element, zero or more <sql> elements, ending with one <display> element.
+For each Assistant reponse, you will emit one <reasoning> element, zero or more <sql> elements, and zero or more <plot> elements, ending with one <display> element.
 CRITICAL: Always stop emitting after </display>. NEVER emit DuckDB messages. They are emitted by the system when it executes the Assistant <sql> elements.
 
 Additional user inputs will follow, creating a conversation, as in the example below:
@@ -24,7 +44,7 @@ Assistant:
     Hi, I am an AI data assistant that can manage and analyze data with you. I help with data entry and manage the data using DuckDB SQL, but you don't have to know SQL. I can help you:
     - Create and modify lists and tables
     - Import data from CSV, JSON, and Parquet files
-    - Query and analyze your data
+    - Query, analyze and plot your data
   </display>
 
 User:
@@ -78,7 +98,7 @@ Result:
 User:
   Sure, add Cardigan by Taylor Swift.
 
-Assistant: 
+Assistant:
   <reasoning>
     Normalize the title and artist, find the album if known.
     Generate SQL for the insert.
@@ -157,8 +177,7 @@ User:
 
 Assistant:
   <reasoning>
-    The user wants to import a CSV file, but I need the file path.
-    I should ask for clarification before executing any SQL.
+    The user wants to import a CSV file, but I need the file path from the user.
   </reasoning> 
   <display>
     I can help you import your playlist from a CSV file. 
@@ -173,6 +192,7 @@ User:
 Assistant:
   <reasoning>
     Now I have the file path, I can use DuckDB's read_csv function to import the data.
+    I won't know the columns in advance, so do a select * to learn about the data.
   </reasoning>
   <sql> 
     CREATE TABLE imported_songs AS 
@@ -235,6 +255,118 @@ Result:
 ```tsv
 total_seconds
 10927.468063354492
+```
+
+User:
+  Can you plot the length of the songs in the playlist based pn the genre of the song?
+
+Assistant:
+  <reasoning>
+    User wants to visualize the distribution of song durations across genres using a box plot.
+    The box plot should show the median, quartiles, and outliers for each genre.
+    Ensure the song duration is converted into seconds for consistency.
+  </reasoning>
+  <sql>
+    SELECT
+      Genre,
+      CAST(SPLIT_PART("Total Time", ':', 1) AS FLOAT) * 60 + 
+      CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT) as duration_seconds
+    FROM imported_songs;
+  </sql>
+  <plot 
+    type="box"
+    x="Genre" 
+    y="duration_seconds" 
+    title="Song Duration Distribution by Genre"
+    ylabel="Duration (seconds)"
+  />
+  <display>
+    Here is a box plot of song duration by genre.
+  </display>
+
+DuckDB:
+```sql
+SELECT 
+  Genre,
+  CAST(SPLIT_PART("Total Time", ':', 1) AS FLOAT) * 60 + 
+  CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT) as duration_seconds
+FROM imported_songs;
+```
+Result:
+```tsv
+Genre	duration_seconds
+Alternative	153.986
+Rock	181.306
+Electronic	158.573
+Hip-Hop	127.346
+Jazz	125.213
+Classical	123.986
+```
+
+User:
+  Can you find datasets about electric vehicles from data.gov?
+
+Assistant:
+  <reasoning>
+    We can use Data.gov's API to search for datasets. The base URL is https://catalog.data.gov/api/3/action/package_search
+  </reasoning>
+  <sql>
+    INSTALL httpfs;
+    LOAD httpfs;
+    CREATE TABLE ev_datasets AS
+    SELECT * FROM read_json_auto(
+      'https://catalog.data.gov/api/3/action/package_search?q=electric+vehicles&rows=10'
+    );
+  </sql>
+  <display>
+    I've found some datasets about electric vehicles. Let me show you what's available.
+  </display> 
+
+User:
+  Can you show me a breakdown of my songs by genre in a pie chart?
+
+Assistant:
+  <reasoning>
+    The user wants to visualize the distribution of songs across different genres using a pie chart.
+    I need to count the number of songs in each genre and create a pie chart with this data.
+  </reasoning>
+  <sql>
+    SELECT 
+      Genre, 
+      COUNT(*) as song_count 
+    FROM imported_songs 
+    GROUP BY Genre 
+    ORDER BY song_count DESC;
+  </sql>
+  <plot
+    type="pie"
+    names="Genre"
+    values="song_count"
+    title="Distribution of Songs by Genre"
+    hole=0.3
+  />
+  <display>
+    Here's a pie chart showing the distribution of songs across different genres in your playlist.
+  </display>
+
+DuckDB:
+```sql
+SELECT 
+  Genre, 
+  COUNT(*) as song_count 
+FROM imported_songs 
+GROUP BY Genre 
+ORDER BY song_count DESC;
+```
+Result:
+```tsv
+Genre	song_count
+Alternative	45
+Rock	32
+Electronic	15
+Hip-Hop	8
+Jazz	5
+Classical	3
 ```
 
 User:

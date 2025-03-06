@@ -6,6 +6,9 @@ from parse import parse_markup
 import re
 import pandas as pd
 import json
+from datetime import datetime
+from plotting import get_plotter
+import plotly.express as px
 
 # Constants
 ASSISTANT_ROLE = "Assistant"
@@ -74,27 +77,41 @@ def format_messages_example(messages: list, limit: int | None = None) -> str:
             example.append(f"{ASSISTANT_ROLE}:\n{content}")
     return "\n\n".join(example) + "\n"
 
-def is_command(text: str) -> tuple[bool, str | None]:
-    """Check if text is a system command and return (is_command, command_type)"""
+def is_command(text: str) -> tuple[bool, str | None, str | None]:
+    """Check if text is a system command and return (is_command, command_type, filename_stem)"""
     text = text.strip().upper()
     if text.startswith("DUMP "):
-        dump_type = text[5:].strip()
+        parts = text[5:].strip().split()
+        dump_type = parts[0]
+        filename_stem = parts[1] if len(parts) > 1 else None
+        
         if dump_type in ["JSON", "EXAMPLE", "TRAIN"]:
-            return True, dump_type
+            return True, dump_type, filename_stem
         # Check for DUMP -N pattern
         if dump_type.startswith("-"):
             try:
                 n = int(dump_type[1:])
-                if n > 0:
-                    return True, dump_type
+                return True, dump_type, filename_stem
             except ValueError:
                 pass
-    return False, None
+    return False, None, None
 
-def handle_command(command_type: str) -> str:
+def handle_command(command_type: str, command_label: str | None) -> str:
     """Handle system commands and return the result text"""
     # Make a deep copy to avoid side effects
     messages = [msg.copy() for msg in st.session_state.messages]
+
+    def dump_file_name(command_type: str, stem: str | None = None) -> str:
+        dump_dir = "dumps"
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        stem = (stem or "dump") + "_" + command_type + "_" + now
+        extension = ".json" if command_type == "JSON" else ".txt"
+        return dump_dir + "/" + stem + extension
+    
+    def write_dump_file(dump: str, command_type: str, stem: str | None = None):
+        filename = dump_file_name(command_type, stem) 
+        with open(filename, "w") as f:
+            f.write(dump)
     
     if command_type == "JSON":
         # Create clean messages without modifying originals
@@ -102,16 +119,23 @@ def handle_command(command_type: str) -> str:
         for msg in messages:
             clean_msg = {k: v for k, v in msg.items() if k != "dataframe"}
             clean_messages.append(clean_msg)
-        return f"{json.dumps(clean_messages, indent=2)}"
+        dump = json.dumps(clean_messages, indent=2)
+        write_dump_file(dump, command_type, command_label)
+        return f"{dump}"
     elif command_type == "EXAMPLE":
-        return format_messages_example(messages)
+        dump = format_messages_example(messages)
+        write_dump_file(dump, command_type, command_label)
+        return f"{dump}"
     elif command_type == "TRAIN":
         return "```\nTraining data dump format (placeholder)\n```"
     elif command_type.startswith("-"):
         try:
             n = int(command_type[1:])
-            if n > 0:
-                return format_messages_example(messages, n)
+            if not n > 0:
+                n = None
+            dump = format_messages_example(messages, n)
+            write_dump_file(dump, command_type, command_label)
+            return f"{dump}"
         except ValueError:
             pass
     
@@ -150,10 +174,33 @@ def display_message(message: dict):
     """Display a message in user-friendly format"""
     with st.chat_message(message["role"]):
         if message["role"] == ASSISTANT_ROLE:
-            # For assistant messages, parse and display only display blocks
+            # For assistant messages, parse and display blocks
             parsed = parse_markup(message["content"])
+            print("DEBUG - Display parsed message:", parsed)
+            
+            # Display text from display blocks
             display_text = "\n\n".join(item["text"] for item in parsed.get("display", []))
             st.markdown(display_text)
+            
+            # We don't need to recreate plots here anymore
+            # Plots will be created in handle_ai_response and stored in the message log
+            
+        elif "figure" in message:
+            # This is a plot message with a stored figure
+            try:
+                # Use the stored plot message ID if available, otherwise generate one
+                plot_msg_id = message.get("plot_msg_id")
+                if not plot_msg_id:
+                    # Fallback to generating an ID if not stored (shouldn't happen with new code)
+                    msg_idx = st.session_state.messages.index(message)
+                    plot_idx = message.get("plot_index", 0)
+                    plot_msg_id = f"stored_plot_{msg_idx}_{plot_idx}"
+                
+                # Display the plot with the consistent ID
+                st.plotly_chart(message["figure"], use_container_width=True, key=plot_msg_id)
+            except Exception as e:
+                st.error(f"Error displaying plot: {str(e)}")
+                print(f"DEBUG - Plot display error: {str(e)}")
         else:
             # For user/database messages
             content = message["content"]
@@ -197,6 +244,9 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
     st.session_state.messages.append({"role": ASSISTANT_ROLE, "content": response})
     
     parsed = parse_markup(response)
+    print("DEBUG - Parsed response:", parsed)
+    
+    last_df = None  # Keep track of the last dataframe for plots
     
     # Execute any SQL blocks
     had_error = False
@@ -207,6 +257,92 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
             sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
             st.session_state.messages.append(sql_message)
             had_error = had_error or is_error
+            if df is not None:
+                last_df = df
+                print(f"DEBUG - SQL result dataframe: {df.shape}, columns: {df.columns.tolist()}")
+    
+    # Handle any plot blocks - this is the ONLY place where plots are created
+    if last_df is not None and parsed.get("plot", []):
+        print(f"DEBUG - Found {len(parsed.get('plot', []))} plot specifications to process")
+        plotter = get_plotter()
+        for i, plot_spec in enumerate(parsed.get("plot", [])):
+            print(f"DEBUG - Processing plot {i+1}/{len(parsed.get('plot', []))}: {plot_spec}")
+            try:
+                # Create the plot
+                fig, error = plotter.create_plot(plot_spec, last_df)
+                
+                if error:
+                    # Handle plot creation error
+                    print(f"DEBUG - Plot creation error: {error}")
+                    
+                    # Create a more user-friendly error message that includes the original plot spec
+                    plot_type = plot_spec.get('type', 'unknown')
+                    error_content = f"{DATABASE_ACTOR}:\n\n**Error creating {plot_type} plot:**\n```\n{error}\n```\n\nPlot specification:\n```json\n{json.dumps(plot_spec, indent=2)}\n```"
+                    
+                    # Add the error message to the conversation
+                    plot_error = {"role": USER_ROLE, "content": error_content, "dataframe": last_df}
+                    st.session_state.messages.append(plot_error)
+                    
+                    # Display the error in the UI
+                    with st.chat_message(USER_ROLE):
+                        st.markdown(error_content)
+                elif fig:
+                    # Generate a unique message ID for this plot
+                    plot_msg_id = f"plot_{len(st.session_state.messages)}_{i}"
+                    print(f"DEBUG - Plot created successfully with ID: {plot_msg_id}")
+                    
+                    # Store the figure object directly in the message
+                    plot_message = {
+                        "role": USER_ROLE, 
+                        "content": f"{DATABASE_ACTOR}:\nPlot created successfully", 
+                        "dataframe": last_df,
+                        "figure": fig,
+                        "plot_index": i,
+                        "plot_msg_id": plot_msg_id  # Store a consistent ID for the plot
+                    }
+                    
+                    # Add the plot message to the session state
+                    st.session_state.messages.append(plot_message)
+                    
+                    # Display the plot with the unique ID
+                    st.plotly_chart(fig, use_container_width=True, key=plot_msg_id)
+                    print(f"DEBUG - Plot displayed with key: {plot_msg_id}")
+                else:
+                    print("DEBUG - No figure and no error returned from create_plot")
+            except Exception as e:
+                # Handle any unexpected errors
+                error_msg = f"Error creating plot: {str(e)}"
+                print(f"DEBUG - Plot error: {str(e)}")
+                import traceback
+                traceback_str = traceback.format_exc()
+                print(f"DEBUG - Plot error traceback: {traceback_str}")
+                
+                # Create a more user-friendly error message
+                plot_type = plot_spec.get('type', 'unknown')
+                error_content = f"{DATABASE_ACTOR}:\n\n**Error creating {plot_type} plot:**\n```\n{error_msg}\n```\n\nPlot specification:\n```json\n{json.dumps(plot_spec, indent=2)}\n```"
+                
+                # Add the error message to the conversation
+                plot_error = {"role": USER_ROLE, "content": error_content, "dataframe": last_df}
+                st.session_state.messages.append(plot_error)
+                
+                # Display the error in the UI
+                with st.chat_message(USER_ROLE):
+                    st.markdown(error_content)
+    elif parsed.get("plot", []):
+        print("DEBUG - Plot specifications found but no dataframe available")
+        
+        # Create an error message for missing dataframe
+        error_content = f"{DATABASE_ACTOR}:\n\n**Error creating plot:**\n```\nNo data available for plotting. Please run a SQL query first.\n```"
+        
+        # Add the error message to the conversation
+        plot_error = {"role": USER_ROLE, "content": error_content}
+        st.session_state.messages.append(plot_error)
+        
+        # Display the error in the UI
+        with st.chat_message(USER_ROLE):
+            st.markdown(error_content)
+    elif last_df is not None:
+        print("DEBUG - Dataframe available but no plot specifications found")
     
     # If SQL error and haven't retried, let AI try again
     if had_error and retry_count == 0:
@@ -241,16 +377,18 @@ def main():
         key=f"chat_input_{len(st.session_state.messages)}"
     ):
         # Check if it's a command first
-        is_cmd, cmd_type = is_command(user_input)
+        is_cmd, cmd_type, cmd_label = is_command(user_input)
         if is_cmd:
             # All commands are diagnostic/utility - show output but don't add to state
-            result = handle_command(cmd_type)
+            result = handle_command(cmd_type, cmd_label)
             # Show the command input and output without adding to state
             with st.chat_message(USER_ROLE):
                 st.markdown(f"{USER_ACTOR}: {user_input}")
             with st.expander("Command Output (not saved to conversation)", expanded=True):
                 # Use st.text() to show raw output for easy copying
                 st.text(result)  # Remove outer backticks since st.text adds its own monospace formatting
+            # Return early to prevent further processing
+            return  # Prevent further processing to avoid triggering plots
         else:
             # For non-commands, add to message history and show
             with st.chat_message(USER_ROLE):
