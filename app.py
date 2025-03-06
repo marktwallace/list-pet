@@ -169,10 +169,14 @@ def display_message(message: dict):
             )
             print("DEBUG - Last SQL message found:", bool(last_sql_message))
             if last_sql_message and "dataframe" in last_sql_message:
+                last_df = last_sql_message["dataframe"]
                 plotter = get_plotter()
-                print("DEBUG - Plot blocks in display:", parsed.get("plot", []))
                 for plot_spec in parsed.get("plot", []):
-                    plotter.create_plot(plot_spec, last_sql_message["dataframe"])
+                    fig, error = plotter.create_plot(plot_spec, last_df)
+                    if error:
+                        st.error(error)
+                    elif fig:
+                        st.plotly_chart(fig, use_container_width=True)
         else:
             # For user/database messages
             content = message["content"]
@@ -235,10 +239,12 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
     # Handle any plot blocks
     if last_df is not None:
         plotter = get_plotter()
-        print("DEBUG - Plot blocks:", parsed.get("plot", []))
-        print("DEBUG - DataFrame available:", last_df is not None)
         for plot_spec in parsed.get("plot", []):
-            plotter.create_plot(plot_spec, last_df)
+            fig, error = plotter.create_plot(plot_spec, last_df)
+            if error:
+                st.error(error)
+            elif fig:
+                st.plotly_chart(fig, use_container_width=True)
     
     # If SQL error and haven't retried, let AI try again
     if had_error and retry_count == 0:
@@ -283,6 +289,8 @@ def main():
             with st.expander("Command Output (not saved to conversation)", expanded=True):
                 # Use st.text() to show raw output for easy copying
                 st.text(result)  # Remove outer backticks since st.text adds its own monospace formatting
+            # Return early to prevent further processing
+            return  # Prevent further processing to avoid triggering plots
         else:
             # For non-commands, add to message history and show
             with st.chat_message(USER_ROLE):
