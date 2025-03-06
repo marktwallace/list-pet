@@ -7,6 +7,7 @@ import re
 import pandas as pd
 import json
 from plotting import get_plotter
+import plotly.express as px
 
 # Constants
 ASSISTANT_ROLE = "Assistant"
@@ -159,24 +160,25 @@ def display_message(message: dict):
             display_text = "\n\n".join(item["text"] for item in parsed.get("display", []))
             st.markdown(display_text)
             
-            # Re-create plots if we have the dataframe from the last SQL result
-            last_sql_message = next(
-                (msg for msg in reversed(st.session_state.messages) 
-                 if msg["role"] == USER_ROLE and 
-                 msg["content"].startswith(f"{DATABASE_ACTOR}:") and
-                 "dataframe" in msg),
-                None
-            )
-            print("DEBUG - Last SQL message found:", bool(last_sql_message))
-            if last_sql_message and "dataframe" in last_sql_message:
-                last_df = last_sql_message["dataframe"]
-                plotter = get_plotter()
-                for plot_spec in parsed.get("plot", []):
-                    fig, error = plotter.create_plot(plot_spec, last_df)
-                    if error:
-                        st.error(error)
-                    elif fig:
-                        st.plotly_chart(fig, use_container_width=True)
+            # We don't need to recreate plots here anymore
+            # Plots will be created in handle_ai_response and stored in the message log
+            
+        elif "figure" in message:
+            # This is a plot message with a stored figure
+            try:
+                # Use the stored plot message ID if available, otherwise generate one
+                plot_msg_id = message.get("plot_msg_id")
+                if not plot_msg_id:
+                    # Fallback to generating an ID if not stored (shouldn't happen with new code)
+                    msg_idx = st.session_state.messages.index(message)
+                    plot_idx = message.get("plot_index", 0)
+                    plot_msg_id = f"stored_plot_{msg_idx}_{plot_idx}"
+                
+                # Display the plot with the consistent ID
+                st.plotly_chart(message["figure"], use_container_width=True, key=plot_msg_id)
+            except Exception as e:
+                st.error(f"Error displaying plot: {str(e)}")
+                print(f"DEBUG - Plot display error: {str(e)}")
         else:
             # For user/database messages
             content = message["content"]
@@ -236,15 +238,44 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
             if df is not None:
                 last_df = df
     
-    # Handle any plot blocks
-    if last_df is not None:
+    # Handle any plot blocks - this is the ONLY place where plots are created
+    if last_df is not None and parsed.get("plot", []):
         plotter = get_plotter()
-        for plot_spec in parsed.get("plot", []):
-            fig, error = plotter.create_plot(plot_spec, last_df)
-            if error:
-                st.error(error)
-            elif fig:
-                st.plotly_chart(fig, use_container_width=True)
+        for i, plot_spec in enumerate(parsed.get("plot", [])):
+            try:
+                # Create the plot
+                fig, error = plotter.create_plot(plot_spec, last_df)
+                
+                if error:
+                    # Handle plot creation error
+                    plot_error = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{error}", "dataframe": last_df}
+                    st.session_state.messages.append(plot_error)
+                elif fig:
+                    # Generate a unique message ID for this plot
+                    plot_msg_id = f"plot_{len(st.session_state.messages)}_{i}"
+                    
+                    # Store the figure object directly in the message
+                    plot_message = {
+                        "role": USER_ROLE, 
+                        "content": f"{DATABASE_ACTOR}:\nPlot created successfully", 
+                        "dataframe": last_df,
+                        "figure": fig,
+                        "plot_index": i,
+                        "plot_msg_id": plot_msg_id  # Store a consistent ID for the plot
+                    }
+                    
+                    # Add the plot message to the session state
+                    st.session_state.messages.append(plot_message)
+                    
+                    # Display the plot with the unique ID
+                    st.plotly_chart(fig, use_container_width=True, key=plot_msg_id)
+            except Exception as e:
+                # Handle any unexpected errors
+                error_msg = f"Error creating plot: {str(e)}"
+                st.error(error_msg)
+                print(f"DEBUG - Plot error: {str(e)}")
+                plot_error = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{error_msg}", "dataframe": last_df}
+                st.session_state.messages.append(plot_error)
     
     # If SQL error and haven't retried, let AI try again
     if had_error and retry_count == 0:

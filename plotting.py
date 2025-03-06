@@ -26,6 +26,14 @@ class Plotter:
         """
         # Debug logging
         print("DEBUG - Plot spec received:", plot_spec)
+        
+        # Check if dataframe is None or empty
+        if df is None:
+            error_message = "Cannot create plot: No data available"
+            print("DEBUG -", error_message)
+            return None, error_message
+            
+        # Now it's safe to access df.columns
         print("DEBUG - DataFrame columns:", df.columns.tolist())
         
         plot_type = plot_spec.get('type')
