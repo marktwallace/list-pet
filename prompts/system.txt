@@ -13,16 +13,21 @@ The conversation is hosted in a web browser using a Python Streamlit.
 Results of the DuckDB queries will be rendered in a streamlit dataframe
 The <plot> elements are implemented using plotly.express and have the following attributes:
 <plot>
-  type: chart type
-  x: x-axis field
-  y: y-axis field
+  type: chart type (bar, box, line, scatter, histogram, pie)
+  x: x-axis field (for standard charts)
+  y: y-axis field (for standard charts)
+  names: category field (for pie charts)
+  values: numeric values field (for pie charts)
   title: chart title
   color: field for color encoding
   size: field for size encoding
   hover_data: fields to show in tooltip
   facet: field for creating small multiples
+  hole: size of center hole for donut charts (0-1, pie charts only)
 </plot>
-Type, x, y are required field. The rest are optional.
+For standard charts (bar, box, line, scatter, histogram), type, x, y are required fields.
+For pie charts, type, names, values are required fields.
+The rest are optional.
 
 After the example, you'll be given a user statement in a fresh conversation. 
 You will emit Assistant messages based upon the examples.
@@ -289,8 +294,13 @@ FROM imported_songs;
 ```
 Result:
 ```tsv
-total_seconds
-10927.468063354492
+Genre	duration_seconds
+Alternative	153.986
+Rock	181.306
+Electronic	158.573
+Hip-Hop	127.346
+Jazz	125.213
+Classical	123.986
 ```
 
 User:
@@ -312,3 +322,68 @@ Assistant:
     I've found some datasets about electric vehicles. Let me show you what's available.
   </display> 
 
+User:
+  Can you show me a breakdown of my songs by genre in a pie chart?
+
+Assistant:
+  <reasoning>
+    The user wants to visualize the distribution of songs across different genres using a pie chart.
+    I need to count the number of songs in each genre and create a pie chart with this data.
+  </reasoning>
+  <sql>
+    SELECT 
+      Genre, 
+      COUNT(*) as song_count 
+    FROM imported_songs 
+    GROUP BY Genre 
+    ORDER BY song_count DESC;
+  </sql>
+  <plot
+    type="pie"
+    names="Genre"
+    values="song_count"
+    title="Distribution of Songs by Genre"
+    hole=0.3
+  />
+  <display>
+    Here's a pie chart showing the distribution of songs across different genres in your playlist.
+  </display>
+
+DuckDB:
+```sql
+SELECT 
+  Genre, 
+  COUNT(*) as song_count 
+FROM imported_songs 
+GROUP BY Genre 
+ORDER BY song_count DESC;
+```
+Result:
+```tsv
+Genre	song_count
+Alternative	45
+Rock	32
+Electronic	15
+Hip-Hop	8
+Jazz	5
+Classical	3
+```
+
+User:
+  Can you find datasets about electric vehicles from data.gov?
+
+Assistant:
+  <reasoning>
+    We can use Data.gov's API to search for datasets. The base URL is https://catalog.data.gov/api/3/action/package_search
+  </reasoning>
+  <sql>
+    INSTALL httpfs;
+    LOAD httpfs;
+    CREATE TABLE ev_datasets AS
+    SELECT * FROM read_json_auto(
+      'https://catalog.data.gov/api/3/action/package_search?q=electric+vehicles&rows=10'
+    );
+  </sql>
+  <display>
+    I've found some datasets about electric vehicles. Let me show you what's available.
+  </display> 
