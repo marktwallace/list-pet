@@ -6,3 +6,5 @@ langchain_community
 langchain_ollama
 langchain_openai
 tabulate
+plotly
+plotly-express
