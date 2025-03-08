@@ -5,12 +5,14 @@ import json
 import pandas as pd
 from datetime import datetime
 import plotly.express as px
+import traceback
 
 from .chat import ChatEngine, get_chat_engine
 from .database import Database, get_database
 from .parse import parse_markup
 from .plotting import get_plotter
 from .sql_utils import is_sql_query, execute_sql, format_sql_label
+from .response_processor import process_sql_blocks, prepare_plot_error_message, prepare_no_data_error_message
 
 # Import command-related utilities and constants
 from .commands import is_command, handle_command
@@ -66,18 +68,12 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
     parsed = parse_markup(response)
     print("DEBUG - Parsed response:", parsed)
     
-    last_df = None
-    had_error = False
-    for block in parsed.get("sql", []):
-        if query := block.get("query"):
-            result, is_error, df = execute_sql(query, db)
-            sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
-            st.session_state.messages.append(sql_message)
-            had_error = had_error or is_error
-            if df is not None:
-                last_df = df
-                print(f"DEBUG - SQL result dataframe: {df.shape}, columns: {df.columns.tolist()}")
+    # Process SQL blocks
+    sql_messages, had_error, last_df = process_sql_blocks(parsed, db)
+    for message in sql_messages:
+        st.session_state.messages.append(message)
     
+    # Process plot specifications if we have data
     if last_df is not None and parsed.get("plot", []):
         print(f"DEBUG - Found {len(parsed.get('plot', []))} plot specifications to process")
         plotter = get_plotter()
@@ -87,12 +83,10 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                 fig, error = plotter.create_plot(plot_spec, last_df)
                 if error:
                     print(f"DEBUG - Plot creation error: {error}")
-                    plot_type = plot_spec.get('type', 'unknown')
-                    error_content = f"{DATABASE_ACTOR}:\n\n**Error creating {plot_type} plot:**\n```\n{error}\n```\n\nPlot specification:\n```json\n{json.dumps(plot_spec, indent=2)}\n```"
-                    plot_error = {"role": USER_ROLE, "content": error_content, "dataframe": last_df}
+                    plot_error = prepare_plot_error_message(plot_spec, error, last_df)
                     st.session_state.messages.append(plot_error)
                     with st.chat_message(USER_ROLE):
-                        st.markdown(error_content)
+                        st.markdown(plot_error["content"])
                 elif fig:
                     plot_msg_id = f"plot_{len(st.session_state.messages)}_{i}"
                     print(f"DEBUG - Plot created successfully with ID: {plot_msg_id}")
@@ -112,22 +106,18 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
             except Exception as e:
                 error_msg = f"Error creating plot: {str(e)}"
                 print(f"DEBUG - Plot error: {str(e)}")
-                import traceback
                 traceback_str = traceback.format_exc()
                 print(f"DEBUG - Plot error traceback: {traceback_str}")
-                plot_type = plot_spec.get('type', 'unknown')
-                error_content = f"{DATABASE_ACTOR}:\n\n**Error creating {plot_type} plot:**\n```\n{error_msg}\n```\n\nPlot specification:\n```json\n{json.dumps(plot_spec, indent=2)}\n```"
-                plot_error = {"role": USER_ROLE, "content": error_content, "dataframe": last_df}
+                plot_error = prepare_plot_error_message(plot_spec, error_msg, last_df)
                 st.session_state.messages.append(plot_error)
                 with st.chat_message(USER_ROLE):
-                    st.markdown(error_content)
+                    st.markdown(plot_error["content"])
     elif parsed.get("plot", []):
         print("DEBUG - Plot specifications found but no dataframe available")
-        error_content = f"{DATABASE_ACTOR}:\n\n**Error creating plot:**\n```\nNo data available for plotting. Please run a SQL query first.\n```"
-        plot_error = {"role": USER_ROLE, "content": error_content}
+        plot_error = prepare_no_data_error_message()
         st.session_state.messages.append(plot_error)
         with st.chat_message(USER_ROLE):
-            st.markdown(error_content)
+            st.markdown(plot_error["content"])
     elif last_df is not None:
         print("DEBUG - Dataframe available but no plot specifications found")
     
