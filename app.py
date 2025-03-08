@@ -192,56 +192,43 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
         new_response = chat_engine.generate_response(st.session_state.messages)
         handle_ai_response(new_response, chat_engine, db, retry_count + 1)
 
-def main():
-    st.title("🐇 List Pet")
-    st.caption("📋 An AI Data Assistant")
+def handle_user_input(user_input: str, db: Database) -> bool:
+    """Process user input, handling commands and SQL queries.
     
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-        with open('prompts/first.txt', 'r') as f:
-            first_message = f.read()
-        st.session_state.messages.append({"role": ASSISTANT_ROLE, "content": first_message})
+    Returns True if the app should rerun after processing.
+    """
+    is_cmd, cmd_type, cmd_label = is_command(user_input)
+    if is_cmd:
+        result = handle_command(cmd_type, cmd_label)
+        with st.chat_message(USER_ROLE):
+            st.markdown(f"{USER_ACTOR}: {user_input}")
+        with st.expander("Command Output (not saved to conversation)", expanded=True):
+            st.text(result)
+        return False
     
-    if "needs_ai_response" not in st.session_state:
-        st.session_state.needs_ai_response = False
+    # Regular user input (not a command)
+    with st.chat_message(USER_ROLE):
+        st.markdown(f"{USER_ACTOR}: {user_input}")
+    st.session_state.messages.append({"role": USER_ROLE, "content": f"{USER_ACTOR}: {user_input}"})
     
-    chat_engine = get_chat_engine("gpt-4o-mini")
-    db = get_database()
+    if is_sql_query(user_input):
+        result, had_error, df = execute_sql(user_input, db)
+        sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
+        st.session_state.messages.append(sql_message)
     
-    for message in st.session_state.messages:
-        display_message(message)
-    
-    if user_input := st.chat_input("Type your question here...", key=f"chat_input_{len(st.session_state.messages)}"):
-        is_cmd, cmd_type, cmd_label = is_command(user_input)
-        if is_cmd:
-            result = handle_command(cmd_type, cmd_label)
-            with st.chat_message(USER_ROLE):
-                st.markdown(f"{USER_ACTOR}: {user_input}")
-            with st.expander("Command Output (not saved to conversation)", expanded=True):
-                st.text(result)
-            return
-        else:
-            with st.chat_message(USER_ROLE):
-                st.markdown(f"{USER_ACTOR}: {user_input}")
-            st.session_state.messages.append({"role": USER_ROLE, "content": f"{USER_ACTOR}: {user_input}"})
-            if is_sql_query(user_input):
-                result, had_error, df = execute_sql(user_input, db)
-                sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
-                st.session_state.messages.append(sql_message)
-                st.session_state.needs_ai_response = True
-                st.rerun()
-            else:
-                st.session_state.needs_ai_response = True
-                st.rerun()
-    
-    if st.session_state.needs_ai_response:
-        with st.chat_message(ASSISTANT_ROLE):
-            with st.spinner("Thinking..."):
-                response = chat_engine.generate_response(st.session_state.messages)
-                handle_ai_response(response, chat_engine, db)
-                st.session_state.needs_ai_response = False
-                st.rerun()
-    
+    st.session_state.needs_ai_response = True
+    return True
+
+def generate_ai_response(chat_engine: ChatEngine, db: Database) -> None:
+    """Generate and process AI response."""
+    with st.chat_message(ASSISTANT_ROLE):
+        with st.spinner("Thinking..."):
+            response = chat_engine.generate_response(st.session_state.messages)
+            handle_ai_response(response, chat_engine, db)
+            st.session_state.needs_ai_response = False
+
+def add_chat_input_focus() -> None:
+    """Add JavaScript to focus the chat input field."""
     import streamlit.components.v1 as components
     components.html("""
         <script>
@@ -259,6 +246,44 @@ def main():
             setTimeout(focusChatInput, 100);
         </script>
     """, height=0, width=0)
+
+def initialize_session_state() -> None:
+    """Initialize session state variables if they don't exist."""
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+        with open('prompts/first.txt', 'r') as f:
+            first_message = f.read()
+        st.session_state.messages.append({"role": ASSISTANT_ROLE, "content": first_message})
+    
+    if "needs_ai_response" not in st.session_state:
+        st.session_state.needs_ai_response = False
+
+def main():
+    st.title("🐇 List Pet")
+    st.caption("📋 An AI Data Assistant")
+    
+    initialize_session_state()
+    
+    chat_engine = get_chat_engine("gpt-4o-mini")
+    db = get_database()
+    
+    # Display all messages in the conversation history
+    for message in st.session_state.messages:
+        display_message(message)
+    
+    # Handle user input if provided
+    if user_input := st.chat_input("Type your question here...", key=f"chat_input_{len(st.session_state.messages)}"):
+        should_rerun = handle_user_input(user_input, db)
+        if should_rerun:
+            st.rerun()
+    
+    # Generate AI response if needed
+    if st.session_state.needs_ai_response:
+        generate_ai_response(chat_engine, db)
+        st.rerun()
+    
+    # Add JavaScript to focus the chat input
+    add_chat_input_focus()
 
 if __name__ == "__main__":
     main()
