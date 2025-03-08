@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 import streamlit as st
-from constants import ASSISTANT_ROLE, USER_ROLE
+from .constants import ASSISTANT_ROLE, USER_ROLE
 
 def format_messages_example(messages: list, limit: int | None = None) -> str:
     """Format messages in example format, optionally limiting to last N messages."""
