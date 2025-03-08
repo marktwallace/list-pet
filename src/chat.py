@@ -6,12 +6,10 @@ from langchain_core.prompts import (
 )
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
-from parse import parse_markup
 import streamlit as st
 
-# Add these constants to match app.py
-ASSISTANT_ROLE = "Assistant"
-USER_ROLE = "User"
+from .parse import parse_markup
+from .constants import ASSISTANT_ROLE, USER_ROLE
 
 @st.cache_resource
 def get_chat_engine(model_name: str):
