@@ -53,12 +53,28 @@ def prepare_plot_error_message(plot_spec: Dict[str, Any], error: str, last_df: O
     error_content = f"{DATABASE_ACTOR}:\n\n**Error creating {plot_type} plot:**\n```\n{error}\n```\n\nPlot specification:\n```json\n{json.dumps(plot_spec, indent=2)}\n```"
     return {"role": USER_ROLE, "content": error_content, "dataframe": last_df}
 
+def prepare_map_error_message(map_spec: Dict[str, Any], error: str, last_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+    """
+    Prepare an error message for a failed map.
+    
+    Args:
+        map_spec: The map specification that failed
+        error: The error message
+        last_df: The dataframe that was being mapped (if available)
+        
+    Returns:
+        A message dictionary to be added to the conversation
+    """
+    map_type = map_spec.get('type', 'unknown')
+    error_content = f"{DATABASE_ACTOR}:\n\n**Error creating {map_type} map:**\n```\n{error}\n```\n\nMap specification:\n```json\n{json.dumps(map_spec, indent=2)}\n```"
+    return {"role": USER_ROLE, "content": error_content, "dataframe": last_df}
+
 def prepare_no_data_error_message() -> Dict[str, Any]:
     """
-    Prepare an error message for when plot specifications are found but no data is available.
+    Prepare an error message for when plot or map specifications are found but no data is available.
     
     Returns:
         A message dictionary to be added to the conversation
     """
-    error_content = f"{DATABASE_ACTOR}:\n\n**Error creating plot:**\n```\nNo data available for plotting. Please run a SQL query first.\n```"
+    error_content = f"{DATABASE_ACTOR}:\n\n**Error creating visualization:**\n```\nNo data available for visualization. Please run a SQL query first.\n```"
     return {"role": USER_ROLE, "content": error_content} 

@@ -11,8 +11,9 @@ from .chat import ChatEngine, get_chat_engine
 from .database import Database, get_database
 from .parse import parse_markup
 from .plotting import get_plotter
+from .mapping import get_mapper
 from .sql_utils import is_sql_query, execute_sql, format_sql_label
-from .response_processor import process_sql_blocks, prepare_plot_error_message, prepare_no_data_error_message
+from .response_processor import process_sql_blocks, prepare_plot_error_message, prepare_map_error_message, prepare_no_data_error_message
 
 # Import command-related utilities and constants
 from .commands import is_command, handle_command
@@ -37,6 +38,17 @@ def display_message(message: dict):
             except Exception as e:
                 st.error(f"Error displaying plot: {str(e)}")
                 print(f"DEBUG - Plot display error: {str(e)}")
+        elif "map_figure" in message:
+            try:
+                map_msg_id = message.get("map_msg_id")
+                if not map_msg_id:
+                    msg_idx = st.session_state.messages.index(message)
+                    map_idx = message.get("map_index", 0)
+                    map_msg_id = f"stored_map_{msg_idx}_{map_idx}"
+                st.plotly_chart(message["map_figure"], use_container_width=True, key=map_msg_id)
+            except Exception as e:
+                st.error(f"Error displaying map: {str(e)}")
+                print(f"DEBUG - Map display error: {str(e)}")
         else:
             content = message["content"]
             if content.startswith(f"{DATABASE_ACTOR}:"):
@@ -120,6 +132,52 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
             st.markdown(plot_error["content"])
     elif last_df is not None:
         print("DEBUG - Dataframe available but no plot specifications found")
+    
+    # Process map specifications if we have data
+    if last_df is not None and parsed.get("map", []):
+        print(f"DEBUG - Found {len(parsed.get('map', []))} map specifications to process")
+        mapper = get_mapper()
+        for i, map_spec in enumerate(parsed.get("map", [])):
+            print(f"DEBUG - Processing map {i+1}/{len(parsed.get('map', []))}: {map_spec}")
+            try:
+                fig, error = mapper.create_map(map_spec, last_df)
+                if error:
+                    print(f"DEBUG - Map creation error: {error}")
+                    map_error = prepare_map_error_message(map_spec, error, last_df)
+                    st.session_state.messages.append(map_error)
+                    with st.chat_message(USER_ROLE):
+                        st.markdown(map_error["content"])
+                elif fig:
+                    map_msg_id = f"map_{len(st.session_state.messages)}_{i}"
+                    print(f"DEBUG - Map created successfully with ID: {map_msg_id}")
+                    map_message = {
+                        "role": USER_ROLE, 
+                        "content": f"{DATABASE_ACTOR}:\nMap created successfully", 
+                        "dataframe": last_df,
+                        "map_figure": fig,
+                        "map_index": i,
+                        "map_msg_id": map_msg_id
+                    }
+                    st.session_state.messages.append(map_message)
+                    st.plotly_chart(fig, use_container_width=True, key=map_msg_id)
+                    print(f"DEBUG - Map displayed with key: {map_msg_id}")
+                else:
+                    print("DEBUG - No figure and no error returned from create_map")
+            except Exception as e:
+                error_msg = f"Error creating map: {str(e)}"
+                print(f"DEBUG - Map error: {str(e)}")
+                traceback_str = traceback.format_exc()
+                print(f"DEBUG - Map error traceback: {traceback_str}")
+                map_error = prepare_map_error_message(map_spec, error_msg, last_df)
+                st.session_state.messages.append(map_error)
+                with st.chat_message(USER_ROLE):
+                    st.markdown(map_error["content"])
+    elif parsed.get("map", []):
+        print("DEBUG - Map specifications found but no dataframe available")
+        map_error = prepare_no_data_error_message()
+        st.session_state.messages.append(map_error)
+        with st.chat_message(USER_ROLE):
+            st.markdown(map_error["content"])
     
     if had_error and retry_count == 0:
         new_response = chat_engine.generate_response(st.session_state.messages)
@@ -218,5 +276,3 @@ def main():
     # Add JavaScript to focus the chat input
     add_chat_input_focus()
 
-if __name__ == "__main__":
-    main()
