@@ -1,0 +1,11 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+
+# Error handling guidelines
+
+- This application is run in a browser. The end user and the LLM/Assistant can see information displayed in the streamlit by way of the message manager. They cannot see console messages from print() statements.
+- So, print statements should only be used for unrecoverable errors where neither the user or the asssitent can take corrective action 
+- If corrective action is possible, the wording of the messages from the message manager should suggest a course of action. E.g. "there is not dataframe, do a SELECT..."
