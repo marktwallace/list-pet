@@ -1,0 +1,50 @@
+CREATE TABLE world_cities AS
+SELECT * FROM read_csv_auto(
+'https://simplemaps.com/static/data/world-cities/basic/simplemaps_worldcities_basicv1.75.zip');
+
+INSTALL httpfs;
+LOAD httpfs;
+
+CREATE TABLE earthquakes AS
+SELECT * FROM read_json_auto(
+'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson', format='auto');
+
+CREATE TABLE us_unemployment AS
+SELECT * FROM read_csv_auto('https://raw.githubusercontent.com/plotly/datasets/master/fips-unemp-16.csv');
+
+-- Save the GeoJSON locally first
+COPY (
+  SELECT * FROM read_json_auto('https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json')
+) TO 'data/us_counties.geojson';
+
+CREATE TABLE flight_routes AS
+SELECT 
+  columns[0] AS airline,
+  columns[1] AS airline_id,
+  columns[2] AS source_airport,
+  columns[3] AS source_airport_id,
+  columns[4] AS destination_airport,
+  columns[5] AS destination_airport_id,
+  columns[6] AS codeshare,
+  columns[7] AS stops,
+  columns[8] AS equipment
+FROM read_csv_auto(
+'https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat', header=false);
+
+-- You'll also need airport coordinates
+CREATE TABLE airports AS
+SELECT 
+  columns[0] AS airport_id,
+  columns[1] AS name,
+  columns[2] AS city,
+  columns[3] AS country,
+  columns[4] AS iata,
+  columns[5] AS icao,
+  CAST(columns[6] AS DOUBLE) AS latitude,
+  CAST(columns[7] AS DOUBLE) AS longitude,
+  CAST(columns[8] AS DOUBLE) AS altitude,
+  columns[9] AS timezone,
+  columns[10] AS dst,
+  columns[11] AS tz_database_time_zone
+FROM read_csv_auto(
+'https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat', header=false);
