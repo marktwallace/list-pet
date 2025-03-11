@@ -1,0 +1,20 @@
+[
+  {
+    "source_id": "us_counties",
+    "property_name": "id",
+    "property_description": "FIPS code",
+    "property_type": "string"
+  },
+  {
+    "source_id": "us_counties",
+    "property_name": "name",
+    "property_description": "County name",
+    "property_type": "string"
+  },
+  {
+    "source_id": "us_counties",
+    "property_name": "state",
+    "property_description": "State abbreviation",
+    "property_type": "string"
+  }
+] 
