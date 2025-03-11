@@ -176,3 +176,4 @@ db/
 
 # Dumps
 dumps/
+logs/
