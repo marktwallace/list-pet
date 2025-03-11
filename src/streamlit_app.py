@@ -85,6 +85,16 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
     for message in sql_messages:
         st.session_state.messages.append(message)
     
+    # If no dataframe was produced in this response, try to get the last dataframe from previous messages
+    if last_df is None and not parsed.get("sql", []):
+        print("DEBUG - No SQL blocks in current response, looking for last dataframe in previous messages")
+        # Look through messages in reverse order to find the most recent dataframe
+        for message in reversed(st.session_state.messages[:-1]):  # Skip the message we just added
+            if "dataframe" in message:
+                last_df = message["dataframe"]
+                print(f"DEBUG - Found previous dataframe: {last_df.shape}, columns: {last_df.columns.tolist()}")
+                break
+    
     # Process plot specifications if we have data
     if last_df is not None and parsed.get("plot", []):
         print(f"DEBUG - Found {len(parsed.get('plot', []))} plot specifications to process")
@@ -97,8 +107,6 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                     print(f"DEBUG - Plot creation error: {error}")
                     plot_error = prepare_plot_error_message(plot_spec, error, last_df)
                     st.session_state.messages.append(plot_error)
-                    with st.chat_message(USER_ROLE):
-                        st.markdown(plot_error["content"])
                 elif fig:
                     plot_msg_id = f"plot_{len(st.session_state.messages)}_{i}"
                     print(f"DEBUG - Plot created successfully with ID: {plot_msg_id}")
@@ -111,8 +119,7 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                         "plot_msg_id": plot_msg_id
                     }
                     st.session_state.messages.append(plot_message)
-                    st.plotly_chart(fig, use_container_width=True, key=plot_msg_id)
-                    print(f"DEBUG - Plot displayed with key: {plot_msg_id}")
+                    print(f"DEBUG - Plot added to messages with key: {plot_msg_id}")
                 else:
                     print("DEBUG - No figure and no error returned from create_plot")
             except Exception as e:
@@ -122,14 +129,10 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                 print(f"DEBUG - Plot error traceback: {traceback_str}")
                 plot_error = prepare_plot_error_message(plot_spec, error_msg, last_df)
                 st.session_state.messages.append(plot_error)
-                with st.chat_message(USER_ROLE):
-                    st.markdown(plot_error["content"])
     elif parsed.get("plot", []):
         print("DEBUG - Plot specifications found but no dataframe available")
         plot_error = prepare_no_data_error_message()
         st.session_state.messages.append(plot_error)
-        with st.chat_message(USER_ROLE):
-            st.markdown(plot_error["content"])
     elif last_df is not None:
         print("DEBUG - Dataframe available but no plot specifications found")
     
@@ -145,8 +148,6 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                     print(f"DEBUG - Map creation error: {error}")
                     map_error = prepare_map_error_message(map_spec, error, last_df)
                     st.session_state.messages.append(map_error)
-                    with st.chat_message(USER_ROLE):
-                        st.markdown(map_error["content"])
                 elif fig:
                     map_msg_id = f"map_{len(st.session_state.messages)}_{i}"
                     print(f"DEBUG - Map created successfully with ID: {map_msg_id}")
@@ -159,8 +160,7 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                         "map_msg_id": map_msg_id
                     }
                     st.session_state.messages.append(map_message)
-                    st.plotly_chart(fig, use_container_width=True, key=map_msg_id)
-                    print(f"DEBUG - Map displayed with key: {map_msg_id}")
+                    print(f"DEBUG - Map added to messages with key: {map_msg_id}")
                 else:
                     print("DEBUG - No figure and no error returned from create_map")
             except Exception as e:
@@ -170,14 +170,10 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                 print(f"DEBUG - Map error traceback: {traceback_str}")
                 map_error = prepare_map_error_message(map_spec, error_msg, last_df)
                 st.session_state.messages.append(map_error)
-                with st.chat_message(USER_ROLE):
-                    st.markdown(map_error["content"])
     elif parsed.get("map", []):
         print("DEBUG - Map specifications found but no dataframe available")
         map_error = prepare_no_data_error_message()
         st.session_state.messages.append(map_error)
-        with st.chat_message(USER_ROLE):
-            st.markdown(map_error["content"])
     
     if had_error and retry_count == 0:
         new_response = chat_engine.generate_response(st.session_state.messages)
@@ -212,11 +208,10 @@ def handle_user_input(user_input: str, db: Database) -> bool:
 
 def generate_ai_response(chat_engine: ChatEngine, db: Database) -> None:
     """Generate and process AI response."""
-    with st.chat_message(ASSISTANT_ROLE):
-        with st.spinner("Thinking..."):
-            response = chat_engine.generate_response(st.session_state.messages)
-            handle_ai_response(response, chat_engine, db)
-            st.session_state.needs_ai_response = False
+    with st.spinner("Thinking..."):
+        response = chat_engine.generate_response(st.session_state.messages)
+        handle_ai_response(response, chat_engine, db)
+        st.session_state.needs_ai_response = False
 
 def add_chat_input_focus() -> None:
     """Add JavaScript to focus the chat input field."""
