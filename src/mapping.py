@@ -216,6 +216,26 @@ class Mapper:
                     except Exception:
                         print(f"DEBUG - Could not parse hover_data: {map_spec[param]}")
                         continue
+                elif param == 'hover_data' and isinstance(map_spec[param], list):
+                    # Filter out columns that don't exist in the dataframe
+                    available_columns = df.columns.tolist()
+                    filtered_hover_data = [col for col in map_spec[param] if col in available_columns]
+                    
+                    if len(filtered_hover_data) < len(map_spec[param]):
+                        missing_columns = [col for col in map_spec[param] if col not in available_columns]
+                        print(f"DEBUG - Filtered out missing hover_data columns: {missing_columns}")
+                        
+                        # Add a warning annotation to the map
+                        if 'title' in map_params:
+                            map_params['title'] = f"{map_params['title']} (Warning: Missing columns: {', '.join(missing_columns)})"
+                        else:
+                            map_params['title'] = f"Warning: Missing columns: {', '.join(missing_columns)}"
+                    
+                    if filtered_hover_data:
+                        map_params[param] = filtered_hover_data
+                    else:
+                        print("DEBUG - No valid hover_data columns found, skipping hover_data")
+                        continue
                 elif param == 'center' and isinstance(map_spec[param], str):
                     # Handle named centers
                     center_name = map_spec[param].lower()

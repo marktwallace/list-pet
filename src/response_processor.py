@@ -34,6 +34,8 @@ def process_sql_blocks(parsed_response: Dict[str, Any], db: Database) -> Tuple[L
             if df is not None:
                 last_df = df
                 print(f"DEBUG - SQL result dataframe: {df.shape}, columns: {df.columns.tolist()}")
+            else:
+                print("DEBUG - SQL query executed, but no dataframe was returned")
     
     return messages, had_error, last_df
 
@@ -71,10 +73,10 @@ def prepare_map_error_message(map_spec: Dict[str, Any], error: str, last_df: Opt
 
 def prepare_no_data_error_message() -> Dict[str, Any]:
     """
-    Prepare an error message for when plot or map specifications are found but no data is available.
+    Prepare an error message when no data is available for visualization.
     
     Returns:
         A message dictionary to be added to the conversation
     """
-    error_content = f"{DATABASE_ACTOR}:\n\n**Error creating visualization:**\n```\nNo data available for visualization. Please run a SQL query first.\n```"
+    error_content = f"{DATABASE_ACTOR}:\n\n**No data available for visualization**\n\nYou need to run a SELECT query to retrieve data before creating a visualization. For example:\n```sql\nSELECT * FROM your_table;\n```\n\nThe most recent SQL statement did not return any data, which is common with INSERT, UPDATE, DELETE, or CREATE statements."
     return {"role": USER_ROLE, "content": error_content} 

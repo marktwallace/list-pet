@@ -1,0 +1,13 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+
+# Coding guidelines
+
+- Always prefer simple solutions.
+- Avoid duplication of code. Check existing code for similar functionality and patterns. Safely refactor existing code for the new use if possible, as long as it does not break existing functionality.
+- Only make changes that are requested or that you are confident are well understood and related to the change being requested.
+- When fixing a bug, do not first introduce a new pattern or technology without first exhausting all options for the existing implementation.
+- Keep the codebase clean and organized. Keep the code concise by avoiding repetition and encapsulating common patterns.
