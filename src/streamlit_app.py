@@ -98,8 +98,18 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
         for message in reversed(message_manager.get_messages()[:-1]):  # Skip the message we just added
             if "dataframe" in message:
                 last_df = message["dataframe"]
-                print(f"DEBUG - Found previous dataframe: {last_df.shape}, columns: {last_df.columns.tolist()}")
+                if last_df is not None:
+                    print(f"DEBUG - Found previous dataframe: {last_df.shape}, columns: {last_df.columns.tolist()}")
+                else:
+                    print("DEBUG - Found previous dataframe reference, but dataframe is None")
                 break
+    
+    # Log whether we have a dataframe for visualization
+    if parsed.get("plot", []) or parsed.get("map", []):
+        if last_df is None:
+            print("DEBUG - No dataframe available for visualization")
+        else:
+            print(f"DEBUG - Dataframe available for visualization: {last_df.shape}")
     
     # Process plot specifications if we have data
     if last_df is not None and parsed.get("plot", []):

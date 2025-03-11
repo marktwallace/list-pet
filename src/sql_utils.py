@@ -8,8 +8,14 @@ def format_sql_result(query: str, df: pd.DataFrame | None, error: str | None) ->
     output.append(f"```sql\n{query}\n```")
     
     if error:
-        output.append("Error:")
-        output.append(f"```\n{error}\n```")
+        # For actual errors, show as errors
+        if error.startswith("SQL Error:"):
+            output.append("Error:")
+            output.append(f"```\n{error}\n```")
+        # For informational messages, show as results
+        else:
+            output.append("Result:")
+            output.append(f"```\n{error}\n```")
         return "\n".join(output), None
     elif df is not None:
         tsv_output = []
@@ -20,6 +26,27 @@ def format_sql_result(query: str, df: pd.DataFrame | None, error: str | None) ->
         output.append("Result:")
         output.append("```tsv\n" + "\n".join(tsv_output) + "\n```")
         return "\n".join(output), df
+    else:
+        # Handle case where there's no error and no dataframe
+        # This happens for successful operations that don't return data
+        output.append("Result:")
+        
+        # Determine the appropriate message based on the query type
+        if query.strip().upper().startswith("CREATE"):
+            output.append("```\nCREATE operation completed. No data to display.\n```")
+        elif query.strip().upper().startswith("INSERT"):
+            output.append("```\nINSERT operation completed. No data to display.\n```")
+        elif query.strip().upper().startswith("UPDATE"):
+            output.append("```\nUPDATE operation completed. No data to display.\n```")
+        elif query.strip().upper().startswith("DELETE"):
+            output.append("```\nDELETE operation completed. No data to display.\n```")
+        elif query.strip().upper().startswith("DROP"):
+            output.append("```\nDROP operation completed. No data to display.\n```")
+        elif query.strip().upper().startswith("ALTER"):
+            output.append("```\nALTER operation completed. No data to display.\n```")
+        else:
+            output.append("```\nOperation completed. No data to display.\n```")
+    
     return "\n".join(output), None
 
 def is_sql_query(text: str) -> bool:
@@ -44,7 +71,8 @@ def execute_sql(query: str, db: Database) -> tuple[str, bool, pd.DataFrame | Non
     """Execute SQL and return (formatted_result, had_error, dataframe)."""
     df, error = db.execute_query(query)
     result, df = format_sql_result(query, df, error)
-    return result, bool(error), df
+    # Only consider it an error if the error message starts with "SQL Error:"
+    return result, bool(error and error.startswith("SQL Error:")), df
 
 def format_sql_label(sql: str, max_length: int = 45) -> str:
     """Format SQL query into a concise label for the expander."""

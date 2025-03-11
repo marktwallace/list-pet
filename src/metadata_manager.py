@@ -51,14 +51,16 @@ class MetadataManager:
                 CREATE TABLE _md_geojson_sources AS 
                 SELECT * FROM read_json_auto('{sources_file}')
             """)
-            if error:
+            # Only raise an error if there's an actual error message
+            # For CREATE operations, error might be None which is fine
+            if error and error.startswith("SQL Error:"):
                 raise RuntimeError(f"Error creating sources table: {error}")
                 
             # Add a unique constraint on source_id after creation
             _, error = self.db.execute_query(
                 "CREATE UNIQUE INDEX idx_geojson_sources_id ON _md_geojson_sources(source_id)"
             )
-            if error:
+            if error and error.startswith("SQL Error:"):
                 raise RuntimeError(f"Error creating index on sources table: {error}")
             
             # Create properties table directly from JSON
@@ -66,14 +68,14 @@ class MetadataManager:
                 CREATE TABLE _md_geojson_properties AS 
                 SELECT * FROM read_json_auto('{properties_file}')
             """)
-            if error:
+            if error and error.startswith("SQL Error:"):
                 raise RuntimeError(f"Error creating properties table: {error}")
                 
             # Add a unique constraint on source_id + property_name after creation
             _, error = self.db.execute_query(
                 "CREATE UNIQUE INDEX idx_geojson_properties_id ON _md_geojson_properties(source_id, property_name)"
             )
-            if error:
+            if error and error.startswith("SQL Error:"):
                 raise RuntimeError(f"Error creating index on properties table: {error}")
             
             print("GeoJSON metadata tables created successfully")

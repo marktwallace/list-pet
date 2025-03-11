@@ -24,9 +24,29 @@ class Database:
                     df = result.df()
                     if not df.empty:
                         return df, None
+                    else:
+                        return None, "Query returned no rows"
                 except Exception as e:
                     return None, f"Error displaying results: {str(e)}"
-            return None, None
+            else:
+                # For non-SELECT statements, provide information about the operation
+                # But don't treat these as errors for internal processing
+                if sql.strip().upper().startswith("INSERT"):
+                    return None, "INSERT operation completed. No data to display. Use SELECT to view data."
+                elif sql.strip().upper().startswith("UPDATE"):
+                    return None, "UPDATE operation completed. No data to display. Use SELECT to view data."
+                elif sql.strip().upper().startswith("DELETE"):
+                    return None, "DELETE operation completed. No data to display. Use SELECT to view data."
+                elif sql.strip().upper().startswith("CREATE"):
+                    # For CREATE statements, return None for the error message
+                    # This allows metadata initialization to work correctly
+                    return None, None
+                elif sql.strip().upper().startswith("DROP"):
+                    return None, "DROP operation completed. No data to display. Use SELECT to view data."
+                elif sql.strip().upper().startswith("ALTER"):
+                    return None, "ALTER operation completed. No data to display. Use SELECT to view data."
+                else:
+                    return None, "Operation completed. No data to display. Use SELECT to view data."
                     
         except Exception as e:
             return None, f"SQL Error: {str(e)}" 
