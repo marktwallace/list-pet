@@ -9,3 +9,30 @@ alwaysApply: false
 - This application is run in a browser. The end user and the LLM/Assistant can see information displayed in the streamlit by way of the message manager. They cannot see console messages from print() statements.
 - So, print statements should only be used for unrecoverable errors where neither the user or the asssitent can take corrective action 
 - If corrective action is possible, the wording of the messages from the message manager should suggest a course of action. E.g. "there is not dataframe, do a SELECT..."
+
+# Error Handling Guidelines
+
+## Error Categories
+1. **Unrecoverable Errors**: System-level errors that prevent the application from functioning properly.
+2. **Recoverable Errors**: Errors that can be addressed by the user or assistant taking corrective action.
+3. **Validation Errors**: Input errors that can be fixed by the user providing correct input.
+
+## Error Reporting Channels
+- **Message Manager**: For all user-visible errors (recoverable and validation errors)
+- **Console/Logs**: For unrecoverable errors and debugging information (not visible to users)
+
+## Error Handling Strategy
+1. **For Unrecoverable Errors**:
+   - Log detailed error information including stack traces
+   - Display a simplified, non-technical message to the user via message manager
+   - Example: `message_manager.add_database_message("The system encountered an unexpected error. Please try again later.")`
+
+2. **For Recoverable Errors**:
+   - Provide clear, actionable guidance in the error message
+   - Include specific steps the user or assistant can take
+   - Example: `message_manager.add_database_message("No data available. Try running a SELECT query first.")`
+
+3. **For Validation Errors**:
+   - Clearly indicate what was invalid
+   - Provide examples of valid input
+   - Example: `message_manager.add_database_message("Invalid SQL syntax. Make sure your query starts with SELECT, INSERT, UPDATE, or DELETE.")`
