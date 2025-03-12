@@ -12,7 +12,7 @@ from .database import Database, get_database
 from .parse import parse_markup
 from .plotting import get_plotter
 from .mapping import get_mapper
-from .sql_utils import is_sql_query, execute_sql, format_sql_label
+from .sql_utils import is_sql_query, execute_sql, format_sql_label, extract_table_name_from_sql
 from .response_processor import process_sql_blocks, prepare_plot_error_message, prepare_map_error_message, prepare_no_data_error_message
 from .message_manager import get_message_manager
 
@@ -95,6 +95,32 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
     
     # Process SQL blocks
     sql_messages, had_error, last_df = process_sql_blocks(parsed, db)
+    
+    # Check for table creation or modification in SQL blocks
+    for sql_block in parsed.get("sql", []):
+        sql_query = sql_block.get("sql", "").strip()
+        if sql_query.upper().startswith("CREATE TABLE"):
+            table_name = extract_table_name_from_sql(sql_query)
+            if table_name:
+                # Get the most recent user message as the request text
+                request_text = None
+                for msg in reversed(message_manager.get_messages()):
+                    if msg["role"] == USER_ROLE and msg["content"].startswith(f"{USER_ACTOR}:"):
+                        request_text = msg["content"]
+                        break
+                
+                # Log the table creation
+                db.log_table_creation(table_name, request_text)
+                
+                # Get row count if the table was created successfully
+                if not had_error:
+                    try:
+                        row_count = db.get_table_row_count(table_name)
+                        if row_count > 0:
+                            db.log_table_creation(table_name, request_text, row_count)
+                    except Exception as e:
+                        print(f"ERROR - Failed to get row count for {table_name}: {str(e)}")
+    
     for sql_message in sql_messages:
         message_manager.add_message(sql_message)
     
@@ -230,6 +256,50 @@ def handle_user_input(user_input: str, db: Database) -> bool:
         try:
             result, had_error, df = execute_sql(user_input, db)
             message_manager.add_database_message(result, df)
+            
+            # Check if this was a CREATE TABLE or ALTER TABLE statement
+            if not had_error:
+                sql_query = user_input.strip()
+                if sql_query.upper().startswith("CREATE TABLE"):
+                    table_name = extract_table_name_from_sql(sql_query)
+                    if table_name:
+                        # Log the table creation with the user's input as the request text
+                        db.log_table_creation(table_name, user_input)
+                        
+                        # Get row count if data was inserted
+                        try:
+                            row_count = db.get_table_row_count(table_name)
+                            if row_count > 0:
+                                db.log_table_creation(table_name, user_input, row_count)
+                        except Exception as e:
+                            print(f"ERROR - Failed to get row count for {table_name}: {str(e)}")
+                
+                elif sql_query.upper().startswith("ALTER TABLE"):
+                    table_name = extract_table_name_from_sql(sql_query)
+                    if table_name:
+                        # Update the altered_at timestamp
+                        db.execute_query(f"""
+                            UPDATE pet_meta.table_description
+                            SET altered_at = CURRENT_TIMESTAMP
+                            WHERE table_name = '{table_name}'
+                        """)
+                
+                elif sql_query.upper().startswith("INSERT INTO"):
+                    # Extract table name from INSERT statement
+                    match = re.search(r"INSERT\s+INTO\s+(\w+(?:\.\w+)?)", sql_query, re.IGNORECASE)
+                    if match:
+                        table_name = match.group(1)
+                        # Update row count
+                        try:
+                            row_count = db.get_table_row_count(table_name)
+                            db.execute_query(f"""
+                                UPDATE pet_meta.table_description
+                                SET row_count = {row_count}
+                                WHERE table_name = '{table_name}'
+                            """)
+                        except Exception as e:
+                            print(f"ERROR - Failed to update row count for {table_name}: {str(e)}")
+                
         except Exception as e:
             error_msg = f"Error executing SQL query: {str(e)}"
             print(f"ERROR - {error_msg}")

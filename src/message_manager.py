@@ -1,6 +1,7 @@
 import streamlit as st
 from .commands import get_logger
 from .constants import ASSISTANT_ROLE, USER_ROLE, USER_ACTOR, DATABASE_ACTOR
+from .database import get_database
 
 class MessageManager:
     """
@@ -11,20 +12,27 @@ class MessageManager:
     def __init__(self):
         """Initialize the message manager and ensure session state is set up."""
         self.logger = get_logger()
+        self.db = get_database()
         self._initialize_session_state()
     
     def _initialize_session_state(self):
         """Initialize session state messages if they don't exist."""
         if "messages" not in st.session_state:
-            st.session_state.messages = []
-            
-            # Add the first assistant message if available
-            try:
-                with open('prompts/first.txt', 'r') as f:
-                    first_message = f.read()
-                self.add_assistant_message(first_message)
-            except Exception as e:
-                print(f"ERROR - Failed to load first message: {str(e)}")
+            # Try to load messages from the database first
+            db_messages = self.db.load_messages()
+            if db_messages:
+                print(f"DEBUG - Loaded {len(db_messages)} messages from database")
+                st.session_state.messages = db_messages
+            else:
+                st.session_state.messages = []
+                
+                # Add the first assistant message if available
+                try:
+                    with open('prompts/first.txt', 'r') as f:
+                        first_message = f.read()
+                    self.add_assistant_message(first_message)
+                except Exception as e:
+                    print(f"ERROR - Failed to load first message: {str(e)}")
     
     def get_messages(self):
         """Get all messages in the conversation."""
@@ -34,6 +42,8 @@ class MessageManager:
         """Add a message to the conversation and log it."""
         st.session_state.messages.append(message)
         self.logger.log_message(message)
+        # Also log to database
+        self.db.log_message(message)
     
     def add_user_message(self, content):
         """Add a user message to the conversation."""
