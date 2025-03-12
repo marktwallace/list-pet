@@ -86,4 +86,41 @@ def format_sql_label(sql: str, max_length: int = 45) -> str:
             label = label[:effective_length]
     else:
         label = first_line[:effective_length]
-    return f"SQL: {label}..." 
+    return f"SQL: {label}..."
+
+def extract_table_name_from_sql(sql: str) -> str:
+    """Extract table name from SQL query.
+    
+    Supports:
+    - CREATE TABLE [IF NOT EXISTS] table_name
+    - ALTER TABLE table_name
+    - DROP TABLE [IF EXISTS] table_name
+    - INSERT INTO table_name
+    """
+    sql = sql.strip()
+    
+    # CREATE TABLE [IF NOT EXISTS] table_name
+    if sql.upper().startswith("CREATE TABLE"):
+        match = re.search(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    
+    # ALTER TABLE table_name
+    elif sql.upper().startswith("ALTER TABLE"):
+        match = re.search(r"ALTER\s+TABLE\s+(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    
+    # DROP TABLE [IF EXISTS] table_name
+    elif sql.upper().startswith("DROP TABLE"):
+        match = re.search(r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    
+    # INSERT INTO table_name
+    elif sql.upper().startswith("INSERT INTO"):
+        match = re.search(r"INSERT\s+INTO\s+(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    
+    return "" 
