@@ -28,7 +28,6 @@ def display_message(message: dict):
     with st.chat_message(message["role"]):
         if message["role"] == ASSISTANT_ROLE:
             parsed = parse_markup(message["content"])
-            print("DEBUG - Display parsed message:", parsed)
             display_text = "\n\n".join(item["text"] for item in parsed.get("display", []))
             st.markdown(display_text)
         elif "figure" in message:
@@ -40,8 +39,12 @@ def display_message(message: dict):
                     plot_msg_id = f"stored_plot_{msg_idx}_{plot_idx}"
                 st.plotly_chart(message["figure"], use_container_width=True, key=plot_msg_id)
             except Exception as e:
-                st.error(f"Error displaying plot: {str(e)}")
-                print(f"DEBUG - Plot display error: {str(e)}")
+                error_message = f"Error displaying plot: {str(e)}"
+                st.error(error_message)
+                print(f"ERROR - {error_message}")
+                print(f"ERROR - Plot display traceback: {traceback.format_exc()}")
+                # Provide a user-friendly message through the message manager
+                message_manager.add_database_message("There was a problem displaying the plot. Please try a different visualization or refresh the page.")
         elif "map_figure" in message:
             try:
                 map_msg_id = message.get("map_msg_id")
@@ -51,8 +54,12 @@ def display_message(message: dict):
                     map_msg_id = f"stored_map_{msg_idx}_{map_idx}"
                 st.plotly_chart(message["map_figure"], use_container_width=True, key=map_msg_id)
             except Exception as e:
-                st.error(f"Error displaying map: {str(e)}")
-                print(f"DEBUG - Map display error: {str(e)}")
+                error_message = f"Error displaying map: {str(e)}"
+                st.error(error_message)
+                print(f"ERROR - {error_message}")
+                print(f"ERROR - Map display traceback: {traceback.format_exc()}")
+                # Provide a user-friendly message through the message manager
+                message_manager.add_database_message("There was a problem displaying the map. Please try a different visualization or refresh the page.")
         else:
             content = message["content"]
             if content.startswith(f"{DATABASE_ACTOR}:"):
@@ -84,7 +91,7 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
     message_manager.add_assistant_message(response)
     
     parsed = parse_markup(response)
-    print("DEBUG - Parsed response:", parsed)
+    print(f"DEBUG - Parsed response: {parsed}")
     
     # Process SQL blocks
     sql_messages, had_error, last_df = process_sql_blocks(parsed, db)
@@ -107,7 +114,7 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
     # Log whether we have a dataframe for visualization
     if parsed.get("plot", []) or parsed.get("map", []):
         if last_df is None:
-            print("DEBUG - No dataframe available for visualization")
+            print("WARNING - No dataframe available for visualization")
         else:
             print(f"DEBUG - Dataframe available for visualization: {last_df.shape}")
     
@@ -120,23 +127,27 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
             try:
                 fig, error = plotter.create_plot(plot_spec, last_df)
                 if error:
-                    print(f"DEBUG - Plot creation error: {error}")
+                    print(f"ERROR - Plot creation failed: {error}")
                     plot_error = prepare_plot_error_message(plot_spec, error, last_df)
                     message_manager.add_message(plot_error)
                 elif fig:
                     message_manager.add_plot_message(last_df, fig, i)
                     print(f"DEBUG - Plot added to messages")
                 else:
-                    print("DEBUG - No figure and no error returned from create_plot")
+                    print("WARNING - No figure and no error returned from create_plot")
+                    # Handle this unexpected case
+                    error_message = "The plot could not be created due to an unknown error. Please check your plot specification and try again."
+                    plot_error = prepare_plot_error_message(plot_spec, error_message, last_df)
+                    message_manager.add_message(plot_error)
             except Exception as e:
                 error_msg = f"Error creating plot: {str(e)}"
-                print(f"DEBUG - Plot error: {str(e)}")
+                print(f"ERROR - {error_msg}")
                 traceback_str = traceback.format_exc()
-                print(f"DEBUG - Plot error traceback: {traceback_str}")
+                print(f"ERROR - Plot error traceback: {traceback_str}")
                 plot_error = prepare_plot_error_message(plot_spec, error_msg, last_df)
                 message_manager.add_message(plot_error)
     elif parsed.get("plot", []):
-        print("DEBUG - Plot specifications found but no dataframe available")
+        print("WARNING - Plot specifications found but no dataframe available")
         plot_error = prepare_no_data_error_message()
         message_manager.add_message(plot_error)
     elif last_df is not None:
@@ -151,29 +162,40 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
             try:
                 fig, error = mapper.create_map(map_spec, last_df)
                 if error:
-                    print(f"DEBUG - Map creation error: {error}")
+                    print(f"ERROR - Map creation failed: {error}")
                     map_error = prepare_map_error_message(map_spec, error, last_df)
                     message_manager.add_message(map_error)
                 elif fig:
                     message_manager.add_map_message(last_df, fig, i)
                     print(f"DEBUG - Map added to messages")
                 else:
-                    print("DEBUG - No figure and no error returned from create_map")
+                    print("WARNING - No figure and no error returned from create_map")
+                    # Handle this unexpected case
+                    error_message = "The map could not be created due to an unknown error. Please check your map specification and try again."
+                    map_error = prepare_map_error_message(map_spec, error_message, last_df)
+                    message_manager.add_message(map_error)
             except Exception as e:
                 error_msg = f"Error creating map: {str(e)}"
-                print(f"DEBUG - Map error: {str(e)}")
+                print(f"ERROR - {error_msg}")
                 traceback_str = traceback.format_exc()
-                print(f"DEBUG - Map error traceback: {traceback_str}")
+                print(f"ERROR - Map error traceback: {traceback_str}")
                 map_error = prepare_map_error_message(map_spec, error_msg, last_df)
                 message_manager.add_message(map_error)
     elif parsed.get("map", []):
-        print("DEBUG - Map specifications found but no dataframe available")
+        print("WARNING - Map specifications found but no dataframe available")
         map_error = prepare_no_data_error_message()
         message_manager.add_message(map_error)
     
     if had_error and retry_count == 0:
-        new_response = chat_engine.generate_response(message_manager.get_messages())
-        handle_ai_response(new_response, chat_engine, db, retry_count + 1)
+        print("DEBUG - Errors occurred during SQL execution, attempting to generate a new response")
+        try:
+            new_response = chat_engine.generate_response(message_manager.get_messages())
+            handle_ai_response(new_response, chat_engine, db, retry_count + 1)
+        except Exception as e:
+            error_msg = f"Error generating new response: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Response generation traceback: {traceback.format_exc()}")
+            message_manager.add_database_message("There was a problem generating a new response. Please try rephrasing your question.")
 
 def handle_user_input(user_input: str, db: Database) -> bool:
     """Process user input, handling commands and SQL queries.
@@ -184,12 +206,19 @@ def handle_user_input(user_input: str, db: Database) -> bool:
     
     is_cmd, cmd_type, cmd_label = is_command(user_input)
     if is_cmd:
-        result = handle_command(cmd_type, cmd_label)
-        with st.chat_message(USER_ROLE):
-            st.markdown(f"{USER_ACTOR}: {user_input}")
-        with st.expander("Command Output (not saved to conversation)", expanded=True):
-            st.text(result)
-        return False
+        try:
+            result = handle_command(cmd_type, cmd_label)
+            with st.chat_message(USER_ROLE):
+                st.markdown(f"{USER_ACTOR}: {user_input}")
+            with st.expander("Command Output (not saved to conversation)", expanded=True):
+                st.text(result)
+            return False
+        except Exception as e:
+            error_msg = f"Error executing command: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Command execution traceback: {traceback.format_exc()}")
+            message_manager.add_database_message(f"Command execution failed: {str(e)}. Please check your command syntax and try again.")
+            return False
     
     # Regular user input (not a command)
     with st.chat_message(USER_ROLE):
@@ -198,8 +227,14 @@ def handle_user_input(user_input: str, db: Database) -> bool:
     message_manager.add_user_message(user_input)
     
     if is_sql_query(user_input):
-        result, had_error, df = execute_sql(user_input, db)
-        message_manager.add_database_message(result, df)
+        try:
+            result, had_error, df = execute_sql(user_input, db)
+            message_manager.add_database_message(result, df)
+        except Exception as e:
+            error_msg = f"Error executing SQL query: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - SQL execution traceback: {traceback.format_exc()}")
+            message_manager.add_database_message(f"SQL execution failed: {str(e)}. Please check your query syntax and try again.")
     
     st.session_state.needs_ai_response = True
     return True
@@ -209,9 +244,16 @@ def generate_ai_response(chat_engine: ChatEngine, db: Database) -> None:
     message_manager = get_message_manager()
     
     with st.spinner("Thinking..."):
-        response = chat_engine.generate_response(message_manager.get_messages())
-        handle_ai_response(response, chat_engine, db)
-        st.session_state.needs_ai_response = False
+        try:
+            response = chat_engine.generate_response(message_manager.get_messages())
+            handle_ai_response(response, chat_engine, db)
+            st.session_state.needs_ai_response = False
+        except Exception as e:
+            error_msg = f"Error generating AI response: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - AI response generation traceback: {traceback.format_exc()}")
+            message_manager.add_database_message("There was a problem generating a response. Please try again or rephrase your question.")
+            st.session_state.needs_ai_response = False
 
 def add_chat_input_focus() -> None:
     """Add JavaScript to focus the chat input field."""
