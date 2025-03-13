@@ -29,7 +29,12 @@ def process_sql_blocks(parsed_response: Dict[str, Any], db: Database) -> Tuple[L
     for block in parsed_response.get("sql", []):
         if query := block.get("query"):
             result, is_error, df = execute_sql(query, db)
-            sql_message = {"role": USER_ROLE, "content": f"{DATABASE_ACTOR}:\n{result}", "dataframe": df}
+            sql_message = {
+                "role": USER_ROLE, 
+                "content": f"{DATABASE_ACTOR}:\n{result}", 
+                "dataframe": df,
+                "query_text": query  # Store the query for potential regeneration
+            }
             messages.append(sql_message)
             had_error = had_error or is_error
             if df is not None:

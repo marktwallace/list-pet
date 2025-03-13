@@ -2,6 +2,8 @@ import streamlit as st
 from .commands import get_logger
 from .constants import ASSISTANT_ROLE, USER_ROLE, USER_ACTOR, DATABASE_ACTOR
 from .database import get_database
+import os
+import uuid
 
 class MessageManager:
     """
@@ -58,44 +60,155 @@ class MessageManager:
         self.add_message(message)
         return message
     
-    def add_database_message(self, content, dataframe=None):
+    def add_database_message(self, content, dataframe=None, query_text=None):
         """Add a database message to the conversation."""
         formatted_content = f"{DATABASE_ACTOR}:\n{content}"
         message = {"role": USER_ROLE, "content": formatted_content}
+        
+        # If a dataframe is provided, store it
         if dataframe is not None:
+            # Generate a unique ID for the dataframe
+            df_id = str(uuid.uuid4())
+            
+            # Create metadata about the dataframe
+            metadata = {
+                "columns": dataframe.columns.tolist(),
+                "shape": dataframe.shape,
+            }
+            
+            # Add sample data (first few rows) to metadata for preview
+            try:
+                # Get first 5 rows as dict records
+                sample_rows = dataframe.head(5).to_dict(orient='records')
+                metadata["sample_data"] = sample_rows
+            except Exception as e:
+                print(f"Error creating sample data: {e}")
+            
+            # Store the dataframe directly in the message
             message["dataframe"] = dataframe
+            message["dataframe_metadata"] = metadata
+            
+            # Store in data_artifacts table
+            if query_text:
+                self.db.store_data_artifact(
+                    message_id=len(st.session_state.messages),  # Current message index
+                    artifact_type="dataframe",
+                    metadata=metadata,
+                    query_text=query_text
+                )
+        
+        # Add query_text if provided
+        if query_text is not None:
+            message["query_text"] = query_text
+        
         self.add_message(message)
         return message
     
-    def add_plot_message(self, dataframe, figure, plot_index=0):
+    def add_plot_message(self, dataframe, figure, plot_index=0, plot_spec=None, query_text=None):
         """Add a plot message to the conversation."""
         # Get the current message count for a unique ID
         message_count = len(st.session_state.messages)
         plot_msg_id = f"plot_{message_count}_{plot_index}"
+        
+        # Create metadata about the dataframe
+        metadata = {}
+        if dataframe is not None:
+            metadata = {
+                "columns": dataframe.columns.tolist(),
+                "shape": dataframe.shape,
+            }
+            
+            # Add sample data (first few rows) to metadata for preview
+            try:
+                # Get first 5 rows as dict records
+                sample_rows = dataframe.head(5).to_dict(orient='records')
+                metadata["sample_data"] = sample_rows
+            except Exception as e:
+                print(f"Error creating sample data: {e}")
+        
+        # Add plot specification to metadata
+        if plot_spec:
+            metadata["plot_spec"] = plot_spec
+        
         message = {
             "role": USER_ROLE, 
             "content": f"{DATABASE_ACTOR}:\nPlot created successfully", 
             "dataframe": dataframe,
             "figure": figure,
             "plot_index": plot_index,
-            "plot_msg_id": plot_msg_id
+            "plot_msg_id": plot_msg_id,
+            "plot_metadata": metadata
         }
+        
+        # Store plot specification and query text for potential regeneration
+        if plot_spec:
+            message["plot_spec"] = plot_spec
+        if query_text:
+            message["query_text"] = query_text
+        
+        # Store in data_artifacts table
+        if query_text:
+            self.db.store_data_artifact(
+                message_id=len(st.session_state.messages),  # Current message index
+                artifact_type="plot",
+                metadata=metadata,
+                query_text=query_text
+            )
+        
         self.add_message(message)
         return message
     
-    def add_map_message(self, dataframe, map_figure, map_index=0):
+    def add_map_message(self, dataframe, map_figure, map_index=0, map_spec=None, query_text=None):
         """Add a map message to the conversation."""
         # Get the current message count for a unique ID
         message_count = len(st.session_state.messages)
         map_msg_id = f"map_{message_count}_{map_index}"
+        
+        # Create metadata about the dataframe
+        metadata = {}
+        if dataframe is not None:
+            metadata = {
+                "columns": dataframe.columns.tolist(),
+                "shape": dataframe.shape,
+            }
+            
+            # Add sample data (first few rows) to metadata for preview
+            try:
+                # Get first 5 rows as dict records
+                sample_rows = dataframe.head(5).to_dict(orient='records')
+                metadata["sample_data"] = sample_rows
+            except Exception as e:
+                print(f"Error creating sample data: {e}")
+        
+        # Add map specification to metadata
+        if map_spec:
+            metadata["map_spec"] = map_spec
+        
         message = {
             "role": USER_ROLE, 
             "content": f"{DATABASE_ACTOR}:\nMap created successfully", 
             "dataframe": dataframe,
             "map_figure": map_figure,
             "map_index": map_index,
-            "map_msg_id": map_msg_id
+            "map_msg_id": map_msg_id,
+            "map_metadata": metadata
         }
+        
+        # Store map specification and query text for potential regeneration
+        if map_spec:
+            message["map_spec"] = map_spec
+        if query_text:
+            message["query_text"] = query_text
+        
+        # Store in data_artifacts table
+        if query_text:
+            self.db.store_data_artifact(
+                message_id=len(st.session_state.messages),  # Current message index
+                artifact_type="map",
+                metadata=metadata,
+                query_text=query_text
+            )
+        
         self.add_message(message)
         return message
 

@@ -1,0 +1,28 @@
+---
+description: Running the Application
+globs: 
+alwaysApply: false
+---
+# Running the Application
+
+## Command to Run the Application
+
+**IMPORTANT**: Before running the application, always kill any existing Streamlit processes to avoid database lock issues:
+
+```bash
+pkill -f streamlit
+```
+
+Then run the application from the project root using:
+
+```bash
+streamlit run app.py
+```
+
+**DO NOT** run it with:
+```bash
+# This will fail due to relative imports
+python -m src.streamlit_app
+# This will also fail due to relative imports
+streamlit run src/streamlit_app.py
+```

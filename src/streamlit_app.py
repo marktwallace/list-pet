@@ -25,65 +25,275 @@ def display_message(message: dict):
     message_manager = get_message_manager()
     messages = message_manager.get_messages()
     
+    # Add debug logging for message content
+    print(f"DEBUG - Displaying message: role={message.get('role')}, keys={list(message.keys())}")
+    
     with st.chat_message(message["role"]):
+        # Handle assistant messages (AI responses)
         if message["role"] == ASSISTANT_ROLE:
             parsed = parse_markup(message["content"])
             display_text = "\n\n".join(item["text"] for item in parsed.get("display", []))
             st.markdown(display_text)
-        elif "figure" in message:
-            try:
-                plot_msg_id = message.get("plot_msg_id")
-                if not plot_msg_id:
-                    msg_idx = messages.index(message)
-                    plot_idx = message.get("plot_index", 0)
-                    plot_msg_id = f"stored_plot_{msg_idx}_{plot_idx}"
-                st.plotly_chart(message["figure"], use_container_width=True, key=plot_msg_id)
-            except Exception as e:
-                error_message = f"Error displaying plot: {str(e)}"
-                st.error(error_message)
-                print(f"ERROR - {error_message}")
-                print(f"ERROR - Plot display traceback: {traceback.format_exc()}")
-                # Provide a user-friendly message through the message manager
-                message_manager.add_database_message("There was a problem displaying the plot. Please try a different visualization or refresh the page.")
-        elif "map_figure" in message:
-            try:
-                map_msg_id = message.get("map_msg_id")
-                if not map_msg_id:
-                    msg_idx = messages.index(message)
-                    map_idx = message.get("map_index", 0)
-                    map_msg_id = f"stored_map_{msg_idx}_{map_idx}"
-                st.plotly_chart(message["map_figure"], use_container_width=True, key=map_msg_id)
-            except Exception as e:
-                error_message = f"Error displaying map: {str(e)}"
-                st.error(error_message)
-                print(f"ERROR - {error_message}")
-                print(f"ERROR - Map display traceback: {traceback.format_exc()}")
-                # Provide a user-friendly message through the message manager
-                message_manager.add_database_message("There was a problem displaying the map. Please try a different visualization or refresh the page.")
-        else:
-            content = message["content"]
-            if content.startswith(f"{DATABASE_ACTOR}:"):
-                import re
-                sql_match = re.search(r"```(?:sql)?\s*\n?(.*?)\n?```", content, re.DOTALL)
-                if sql_match:
-                    sql_query = sql_match.group(1).strip()
-                    with st.expander(format_sql_label(sql_query)):
-                        st.markdown(f"```sql\n{sql_query}\n```")
-                if "Error:" in content:
-                    error_match = re.search(r"Error:.*?```(.*?)```", content, re.DOTALL)
-                    if error_match:
-                        st.markdown(f"```\n{error_match.group(1).strip()}\n```")
-                else:
-                    df = message.get("dataframe")
-                    if df is not None:
-                        st.dataframe(
-                            df,
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={ col: st.column_config.Column(width="auto") for col in df.columns }
-                        )
+            return
+        
+        # Handle database actor messages (SQL results, plots, maps)
+        content = message.get("content", "")
+        if content.startswith(f"{DATABASE_ACTOR}:"):
+            # Display the content text
+            st.markdown(content)
+            
+            # Handle SQL query display
+            sql_match = re.search(r"```(?:sql)?\s*\n?(.*?)\n?```", content, re.DOTALL)
+            if sql_match:
+                sql_query = sql_match.group(1).strip()
+                with st.expander(format_sql_label(sql_query)):
+                    st.markdown(f"```sql\n{sql_query}\n```")
+            
+            # Handle error messages
+            if "Error:" in content:
+                error_match = re.search(r"Error:.*?```(.*?)```", content, re.DOTALL)
+                if error_match:
+                    st.markdown(f"```\n{error_match.group(1).strip()}\n```")
+            
+            # Handle actual figures (plots)
+            if "figure" in message:
+                try:
+                    plot_msg_id = message.get("plot_msg_id")
+                    if not plot_msg_id:
+                        msg_idx = messages.index(message)
+                        plot_idx = message.get("plot_index", 0)
+                        plot_msg_id = f"stored_plot_{msg_idx}_{plot_idx}"
+                    st.plotly_chart(message["figure"], use_container_width=True, key=plot_msg_id)
+                except Exception as e:
+                    error_message = f"Error displaying plot: {str(e)}"
+                    st.error(error_message)
+                    print(f"ERROR - {error_message}")
+                    print(f"ERROR - Plot display traceback: {traceback.format_exc()}")
+            
+            # Handle actual maps
+            elif "map_figure" in message:
+                try:
+                    map_msg_id = message.get("map_msg_id")
+                    if not map_msg_id:
+                        msg_idx = messages.index(message)
+                        map_idx = message.get("map_index", 0)
+                        map_msg_id = f"stored_map_{msg_idx}_{map_idx}"
+                    st.plotly_chart(message["map_figure"], use_container_width=True, key=map_msg_id)
+                except Exception as e:
+                    error_message = f"Error displaying map: {str(e)}"
+                    st.error(error_message)
+                    print(f"ERROR - {error_message}")
+                    print(f"ERROR - Map display traceback: {traceback.format_exc()}")
+            
+            # Handle actual dataframes
+            elif "dataframe" in message and isinstance(message["dataframe"], pd.DataFrame):
+                df = message["dataframe"]
+                with st.expander("View Data", expanded=True):
+                    st.dataframe(
+                        df,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={ col: st.column_config.Column(width="auto") for col in df.columns }
+                    )
+            
+            # Handle recovered artifacts that need regeneration
+            elif message.get("had_data_artifact") and "data_artifacts" in message:
+                print(f"DEBUG - Found message with recoverable artifacts: message_id={message.get('message_id')}")
+                print(f"DEBUG - Artifacts: {message.get('data_artifacts')}")
+                display_recoverable_artifacts(message, message_manager)
             else:
-                st.markdown(content)
+                print(f"DEBUG - Message has no recoverable artifacts: had_data_artifact={message.get('had_data_artifact')}, has_data_artifacts={'data_artifacts' in message}")
+                if message.get("had_data_artifact"):
+                    print(f"DEBUG - Message marked as having data artifacts but none found")
+                    if "message_id" in message:
+                        print(f"DEBUG - Message ID: {message.get('message_id')}")
+            
+            return
+        
+        # Handle regular user messages
+        st.markdown(content)
+
+def display_recoverable_artifacts(message, message_manager):
+    """Display recoverable artifacts with regeneration options."""
+    print(f"DEBUG - Displaying recoverable artifacts for message: {message.get('message_id')}")
+    print(f"DEBUG - Data artifacts: {len(message.get('data_artifacts', []))}")
+    
+    st.info("This message contained data that can be regenerated")
+    
+    for artifact in message["data_artifacts"]:
+        artifact_type = artifact.get("type", "unknown")
+        query_text = artifact.get("query_text")
+        
+        print(f"DEBUG - Processing artifact: type={artifact_type}, has_query={query_text is not None}")
+        print(f"DEBUG - Artifact details: {artifact}")
+        
+        # Create a visual separator between artifacts if there are multiple
+        if artifact != message["data_artifacts"][0]:
+            st.divider()
+        
+        # Show artifact type with an icon
+        if artifact_type == "dataframe":
+            st.subheader("📊 Dataframe", divider="gray")
+        elif artifact_type == "plot":
+            st.subheader("📈 Plot", divider="gray")
+        elif artifact_type == "map":
+            st.subheader("🗺️ Map", divider="gray")
+        else:
+            st.subheader(f"📄 {artifact_type.capitalize()}", divider="gray")
+        
+        # Add a button to regenerate the data - moved to top for better visibility
+        if query_text:
+            st.write("**Regenerate this data:**")
+            button_key = f"regen_{artifact.get('id')}"
+            print(f"DEBUG - Button key: {button_key}")
+            regenerate = st.button(
+                f"Regenerate {artifact_type.capitalize()}", 
+                key=button_key,
+                type="primary",
+                use_container_width=True  # Make button full width
+            )
+            print(f"DEBUG - Button created with key: {button_key}")
+        else:
+            st.warning("Cannot regenerate this data (no SQL query available)")
+            print(f"DEBUG - No query_text available for artifact {artifact.get('id')}, cannot add regenerate button")
+        
+        # Show artifact metadata
+        if "metadata" in artifact:
+            metadata = artifact.get("metadata", {})
+            print(f"DEBUG - Metadata: {metadata}")
+            
+            # Display basic metadata directly
+            if "columns" in metadata:
+                st.caption(f"Columns: {', '.join(metadata['columns'])}")
+            if "shape" in metadata:
+                st.caption(f"Data shape: {metadata['shape'][0]} rows × {metadata['shape'][1]} columns")
+            
+            # For dataframes, show a preview of the structure and sample data if available
+            if artifact_type == "dataframe" and "columns" in metadata:
+                # Show sample data if available
+                if "sample_data" in metadata and metadata["sample_data"]:
+                    print(f"DEBUG - Sample data available: {len(metadata['sample_data'])} rows")
+                    st.write("**Data Preview:**")
+                    try:
+                        # Convert sample data to dataframe
+                        sample_df = pd.DataFrame(metadata["sample_data"])
+                        st.dataframe(
+                            sample_df,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                        st.caption("(Preview of first few rows - regenerate to see full data)")
+                    except Exception as e:
+                        error_msg = f"Could not display data preview: {str(e)}"
+                        st.warning(error_msg)
+                        print(f"ERROR - {error_msg}")
+                else:
+                    print("DEBUG - No sample data available, showing structure preview")
+                    # Show structure preview if no sample data
+                    st.write("**Data Structure Preview:**")
+                    # Create a sample dataframe structure
+                    cols = metadata["columns"]
+                    sample_data = {col: ["..."] for col in cols}
+                    sample_df = pd.DataFrame(sample_data)
+                    st.dataframe(
+                        sample_df,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+            
+            # For plots, show plot type and key parameters
+            if artifact_type == "plot" and "plot_spec" in metadata:
+                plot_spec = metadata["plot_spec"]
+                plot_type = plot_spec.get("type", "unknown")
+                st.caption(f"Plot type: {plot_type}")
+                
+                # Show key plot parameters
+                params = []
+                for key in ["x", "y", "color", "size", "title"]:
+                    if key in plot_spec:
+                        params.append(f"{key}={plot_spec[key]}")
+                if params:
+                    st.caption(f"Parameters: {', '.join(params)}")
+            
+            # For maps, show map type and key parameters
+            if artifact_type == "map" and "map_spec" in metadata:
+                map_spec = metadata["map_spec"]
+                map_type = map_spec.get("type", "unknown")
+                st.caption(f"Map type: {map_type}")
+                
+                # Show key map parameters
+                params = []
+                for key in ["lat", "lon", "color", "size", "title", "locations", "geojson"]:
+                    if key in map_spec:
+                        params.append(f"{key}={map_spec[key]}")
+                if params:
+                    st.caption(f"Parameters: {', '.join(params)}")
+        
+        if query_text:
+            # Use a single expander for the SQL query
+            with st.expander("SQL Query"):
+                st.code(query_text, language="sql")
+            
+            if regenerate:
+                print(f"DEBUG - Regenerate button clicked for {artifact_type}")
+                with st.spinner(f"Regenerating {artifact_type}..."):
+                    try:
+                        db = get_database()
+                        
+                        # Execute the query to get the dataframe
+                        result, is_error, df = execute_sql(query_text, db)
+                        
+                        if is_error or df is None:
+                            error_msg = f"Failed to regenerate data: {result}"
+                            st.error(error_msg)
+                            print(f"ERROR - {error_msg}")
+                        else:
+                            print(f"DEBUG - Query executed successfully, dataframe shape: {df.shape}")
+                            # For dataframe only, just display it
+                            if artifact_type == "dataframe":
+                                message_manager.add_database_message(
+                                    f"Regenerated data from query:\n```sql\n{query_text}\n```", 
+                                    dataframe=df,
+                                    query_text=query_text
+                                )
+                                st.success(f"Dataframe regenerated successfully with {len(df)} rows")
+                            # For plots, recreate the plot
+                            elif artifact_type == "plot" and "metadata" in artifact:
+                                metadata = artifact.get("metadata", {})
+                                if "plot_spec" in metadata:
+                                    plot_spec = metadata["plot_spec"]
+                                    plotter = get_plotter()
+                                    fig, error = plotter.create_plot(plot_spec, df)
+                                    if error:
+                                        st.error(f"Failed to regenerate plot: {error}")
+                                    else:
+                                        message_manager.add_plot_message(
+                                            df, fig, 0, plot_spec, query_text
+                                        )
+                                        st.success("Plot regenerated successfully")
+                            # For maps, recreate the map
+                            elif artifact_type == "map" and "metadata" in artifact:
+                                metadata = artifact.get("metadata", {})
+                                if "map_spec" in metadata:
+                                    map_spec = metadata["map_spec"]
+                                    mapper = get_mapper()
+                                    fig, error = mapper.create_map(map_spec, df)
+                                    if error:
+                                        st.error(f"Failed to regenerate map: {error}")
+                                    else:
+                                        message_manager.add_map_message(
+                                            df, fig, 0, map_spec, query_text
+                                        )
+                                        st.success("Map regenerated successfully")
+                            
+                            # Force a rerun to show the new message
+                            print("DEBUG - Forcing rerun to show new message")
+                            st.rerun()
+                    except Exception as e:
+                        error_msg = f"Error regenerating data: {str(e)}"
+                        st.error(error_msg)
+                        print(f"ERROR - Regeneration error: {str(e)}")
+                        print(f"ERROR - Regeneration traceback: {traceback.format_exc()}")
 
 def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, retry_count: int = 0) -> None:
     """Process AI response, executing any SQL and handling errors."""
@@ -157,8 +367,15 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                     plot_error = prepare_plot_error_message(plot_spec, error, last_df)
                     message_manager.add_message(plot_error)
                 elif fig:
-                    message_manager.add_plot_message(last_df, fig, i)
-                    print(f"DEBUG - Plot added to messages")
+                    # Find the most recent SQL query that produced this dataframe
+                    query_text = None
+                    for msg in reversed(message_manager.get_messages()):
+                        if "query_text" in msg and "dataframe" in msg and msg["dataframe"] is not None:
+                            query_text = msg["query_text"]
+                            break
+                    
+                    message_manager.add_plot_message(last_df, fig, i, plot_spec, query_text)
+                    print(f"DEBUG - Plot added to messages with query: {query_text is not None}")
                 else:
                     print("WARNING - No figure and no error returned from create_plot")
                     # Handle this unexpected case
@@ -192,8 +409,15 @@ def handle_ai_response(response: str, chat_engine: ChatEngine, db: Database, ret
                     map_error = prepare_map_error_message(map_spec, error, last_df)
                     message_manager.add_message(map_error)
                 elif fig:
-                    message_manager.add_map_message(last_df, fig, i)
-                    print(f"DEBUG - Map added to messages")
+                    # Find the most recent SQL query that produced this dataframe
+                    query_text = None
+                    for msg in reversed(message_manager.get_messages()):
+                        if "query_text" in msg and "dataframe" in msg and msg["dataframe"] is not None:
+                            query_text = msg["query_text"]
+                            break
+                    
+                    message_manager.add_map_message(last_df, fig, i, map_spec, query_text)
+                    print(f"DEBUG - Map added to messages with query: {query_text is not None}")
                 else:
                     print("WARNING - No figure and no error returned from create_map")
                     # Handle this unexpected case
@@ -255,7 +479,8 @@ def handle_user_input(user_input: str, db: Database) -> bool:
     if is_sql_query(user_input):
         try:
             result, had_error, df = execute_sql(user_input, db)
-            message_manager.add_database_message(result, df)
+            # Store the query text in the message for potential regeneration
+            message_manager.add_database_message(result, df, user_input)
             
             # Check if this was a CREATE TABLE or ALTER TABLE statement
             if not had_error:

@@ -61,6 +61,20 @@ class Database:
             """)
             print("DEBUG - pet_meta.table_description table created or already exists")
             
+            # Create data_artifacts table if it doesn't exist
+            self.execute_query("""
+                CREATE TABLE IF NOT EXISTS pet_meta.data_artifacts (
+                    id INTEGER PRIMARY KEY,
+                    message_id INTEGER,
+                    artifact_type VARCHAR NOT NULL,
+                    query_text TEXT,
+                    metadata JSON,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (message_id) REFERENCES pet_meta.message_log(id)
+                )
+            """)
+            print("DEBUG - pet_meta.data_artifacts table created or already exists")
+            
             # Create sequence for message_log if it doesn't exist
             self.execute_query("""
                 CREATE SEQUENCE IF NOT EXISTS pet_meta.message_log_seq
@@ -70,6 +84,12 @@ class Database:
             # Create sequence for table_description if it doesn't exist
             self.execute_query("""
                 CREATE SEQUENCE IF NOT EXISTS pet_meta.table_description_seq
+                START 1 INCREMENT 1
+            """)
+            
+            # Create sequence for data_artifacts if it doesn't exist
+            self.execute_query("""
+                CREATE SEQUENCE IF NOT EXISTS pet_meta.data_artifacts_seq
                 START 1 INCREMENT 1
             """)
             
@@ -88,10 +108,20 @@ class Database:
             has_figure = "figure" in message or "map_figure" in message
             
             # Insert the message into the log
-            self.execute_query(f"""
+            result = self.execute_query(f"""
                 INSERT INTO pet_meta.message_log (id, role, message_text, has_dataframe, has_figure)
                 VALUES (nextval('pet_meta.message_log_seq'), '{role}', $1, {has_dataframe}, {has_figure})
+                RETURNING id
             """, params=[content])
+            
+            # Get the message ID for potential data artifact logging
+            message_id = None
+            if result is not None and isinstance(result, pd.DataFrame) and not result.empty:
+                message_id = result.iloc[0]['id']
+                
+                # If this message has a dataframe or figure, log it as a data artifact
+                if has_dataframe or has_figure:
+                    self.log_data_artifact(message_id, message)
             
             print(f"DEBUG - Message logged to pet_meta.message_log: role={role}, has_dataframe={has_dataframe}, has_figure={has_figure}")
             return True
@@ -99,6 +129,87 @@ class Database:
             error_msg = f"Failed to log message: {str(e)}"
             print(f"ERROR - {error_msg}")
             print(f"ERROR - Message logging traceback: {traceback.format_exc()}")
+            return False
+    
+    def log_data_artifact(self, message_id, message):
+        """Log a data artifact associated with a message"""
+        try:
+            # Determine artifact type
+            artifact_type = None
+            if "dataframe" in message and message["dataframe"] is not None:
+                artifact_type = "dataframe"
+            elif "figure" in message:
+                artifact_type = "plot"
+            elif "map_figure" in message:
+                artifact_type = "map"
+            else:
+                print("WARNING - No recognizable data artifact in message")
+                return False
+                
+            # Extract query text if available
+            query_text = None
+            if "query_text" in message:
+                query_text = message["query_text"]
+                
+            # Build metadata JSON
+            metadata = {}
+            
+            # For plots, include plot specifications
+            if artifact_type == "plot" and "plot_spec" in message:
+                metadata["plot_spec"] = message["plot_spec"]
+            
+            # For plots, also check for the older format
+            elif artifact_type == "plot" and not "plot_spec" in message:
+                # Try to extract plot spec from the figure data
+                try:
+                    if "figure" in message and message["figure"] is not None:
+                        fig = message["figure"]
+                        if hasattr(fig, "data") and len(fig.data) > 0:
+                            # Extract basic plot info
+                            plot_spec = {"type": fig.data[0].type}
+                            metadata["plot_spec"] = plot_spec
+                            print(f"DEBUG - Extracted plot type from figure: {plot_spec['type']}")
+                except Exception as e:
+                    print(f"WARNING - Failed to extract plot spec from figure: {str(e)}")
+                
+            # For maps, include map specifications
+            if artifact_type == "map" and "map_spec" in message:
+                metadata["map_spec"] = message["map_spec"]
+                
+            # Include dataframe info (column names, etc.)
+            if "dataframe" in message and message["dataframe"] is not None:
+                df = message["dataframe"]
+                metadata["columns"] = df.columns.tolist()
+                metadata["shape"] = list(df.shape)
+                
+                # Include a sample of the data for preview (first few rows)
+                try:
+                    sample_rows = min(5, len(df))
+                    sample_data = df.head(sample_rows).to_dict(orient='records')
+                    metadata["sample_data"] = sample_data
+                    print(f"DEBUG - Included sample data ({sample_rows} rows) in metadata")
+                except Exception as e:
+                    print(f"WARNING - Failed to include sample data: {str(e)}")
+                
+            # Insert the data artifact
+            self.execute_query(f"""
+                INSERT INTO pet_meta.data_artifacts 
+                (id, message_id, artifact_type, query_text, metadata)
+                VALUES (
+                    nextval('pet_meta.data_artifacts_seq'),
+                    {message_id},
+                    '{artifact_type}',
+                    $1,
+                    $2
+                )
+            """, params=[query_text, json.dumps(metadata)])
+            
+            print(f"DEBUG - Data artifact logged: type={artifact_type}, message_id={message_id}")
+            return True
+        except Exception as e:
+            error_msg = f"Failed to log data artifact: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Data artifact logging traceback: {traceback.format_exc()}")
             return False
     
     def log_table_creation(self, table_name, request_text=None, row_count=None):
@@ -176,11 +287,144 @@ class Database:
             print(f"ERROR - Failed to get row count for {table_name}: {str(e)}")
             return 0
     
+    def get_data_artifacts_for_message(self, message_id):
+        """Get data artifacts associated with a message"""
+        try:
+            print(f"DEBUG - Getting data artifacts for message {message_id}")
+            df, _ = self.execute_query(f"""
+                SELECT id, artifact_type, query_text, metadata
+                FROM pet_meta.data_artifacts
+                WHERE message_id = {message_id}
+            """)
+            
+            if df is None or df.empty:
+                print(f"DEBUG - No data artifacts found for message {message_id}")
+                return []
+            
+            print(f"DEBUG - Found {len(df)} data artifacts for message {message_id}")
+            
+            artifacts = []
+            for _, row in df.iterrows():
+                artifact = {
+                    "id": row['id'],
+                    "type": row['artifact_type'],
+                    "query_text": row['query_text']
+                }
+                
+                # Parse metadata JSON
+                if row['metadata']:
+                    try:
+                        artifact["metadata"] = json.loads(row['metadata'])
+                        print(f"DEBUG - Parsed metadata for artifact {row['id']}, type: {row['artifact_type']}")
+                        
+                        # Check for sample data
+                        if "sample_data" in artifact["metadata"]:
+                            print(f"DEBUG - Artifact {row['id']} has sample data with {len(artifact['metadata']['sample_data'])} rows")
+                    except Exception as e:
+                        print(f"ERROR - Failed to parse metadata JSON for artifact {row['id']}: {str(e)}")
+                        artifact["metadata"] = {}
+                        
+                artifacts.append(artifact)
+            
+            return artifacts
+        except Exception as e:
+            error_msg = f"Failed to get data artifacts: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Get artifacts traceback: {traceback.format_exc()}")
+            return []
+    
+    def repair_missing_data_artifacts(self):
+        """Check for messages marked with data artifacts but missing entries in data_artifacts table"""
+        try:
+            print("DEBUG - Checking for messages with missing data artifacts")
+            # Find messages marked as having dataframes or figures but no entries in data_artifacts
+            df, _ = self.execute_query("""
+                SELECT ml.id, ml.message_text, ml.has_dataframe, ml.has_figure
+                FROM pet_meta.message_log ml
+                LEFT JOIN pet_meta.data_artifacts da ON ml.id = da.message_id
+                WHERE (ml.has_dataframe = TRUE OR ml.has_figure = TRUE)
+                AND da.id IS NULL
+            """)
+            
+            if df is None or df.empty:
+                print("DEBUG - No inconsistencies found between message_log and data_artifacts")
+                return 0
+            
+            print(f"DEBUG - Found {len(df)} messages with missing data artifacts")
+            
+            # For each message with missing artifacts, create a placeholder entry
+            count = 0
+            for _, row in df.iterrows():
+                message_id = row['id']
+                message_text = row['message_text']
+                has_dataframe = row['has_dataframe']
+                has_figure = row['has_figure']
+                
+                print(f"DEBUG - Repairing message {message_id}: has_dataframe={has_dataframe}, has_figure={has_figure}")
+                
+                # Try to extract SQL query from message text
+                query_text = None
+                sql_match = re.search(r"```(?:sql)?\s*\n?(.*?)\n?```", message_text, re.DOTALL)
+                if sql_match:
+                    query_text = sql_match.group(1).strip()
+                    print(f"DEBUG - Extracted SQL query from message {message_id}")
+                
+                # Determine artifact type
+                artifact_type = "dataframe" if has_dataframe else "plot" if has_figure else "unknown"
+                
+                # Create basic metadata
+                metadata = {}
+                
+                # For dataframes, try to extract column info from message text
+                if artifact_type == "dataframe":
+                    # Look for column names in the message
+                    cols_match = re.search(r"Columns:\s*(.*?)(?:\n|$)", message_text)
+                    if cols_match:
+                        cols_text = cols_match.group(1).strip()
+                        columns = [col.strip() for col in cols_text.split(',')]
+                        metadata["columns"] = columns
+                        print(f"DEBUG - Extracted columns from message {message_id}: {columns}")
+                    
+                    # Look for shape info in the message
+                    shape_match = re.search(r"(\d+)\s*rows\s*[×x]\s*(\d+)\s*columns", message_text)
+                    if shape_match:
+                        rows = int(shape_match.group(1))
+                        cols = int(shape_match.group(2))
+                        metadata["shape"] = [rows, cols]
+                        print(f"DEBUG - Extracted shape from message {message_id}: {rows} rows × {cols} columns")
+                
+                # Insert the data artifact - removed artifact_id column
+                self.execute_query(f"""
+                    INSERT INTO pet_meta.data_artifacts 
+                    (id, message_id, artifact_type, query_text, metadata)
+                    VALUES (
+                        nextval('pet_meta.data_artifacts_seq'),
+                        {message_id},
+                        '{artifact_type}',
+                        $1,
+                        $2
+                    )
+                """, params=[query_text, json.dumps(metadata)])
+                
+                count += 1
+                print(f"DEBUG - Created placeholder data artifact for message {message_id}")
+            
+            print(f"DEBUG - Repaired {count} messages with missing data artifacts")
+            return count
+        except Exception as e:
+            error_msg = f"Failed to repair missing data artifacts: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Repair traceback: {traceback.format_exc()}")
+            return 0
+    
     def load_messages(self):
         """Load messages from pet_meta.message_log"""
         try:
+            # First, check and repair any inconsistencies
+            self.repair_missing_data_artifacts()
+            
             df, _ = self.execute_query("""
-                SELECT role, message_text, has_dataframe, has_figure
+                SELECT id, role, message_text, has_dataframe, has_figure
                 FROM pet_meta.message_log
                 ORDER BY id ASC
             """)
@@ -189,14 +433,50 @@ class Database:
                 print("DEBUG - No messages found in pet_meta.message_log")
                 return []
             
+            print(f"DEBUG - Found {len(df)} messages in pet_meta.message_log")
+            
             messages = []
             for _, row in df.iterrows():
                 message = {
                     "role": row['role'],
                     "content": row['message_text']
                 }
-                # Note: We can't restore actual dataframes or figures,
-                # but we can flag that they existed
+                
+                # Add flags for data artifacts
+                if row['has_dataframe'] or row['has_figure']:
+                    message["had_data_artifact"] = True
+                    message["message_id"] = row['id']
+                    
+                    print(f"DEBUG - Message {row['id']} had data artifact: has_dataframe={row['has_dataframe']}, has_figure={row['has_figure']}")
+                    
+                    # Get associated data artifacts
+                    artifacts = self.get_data_artifacts_for_message(row['id'])
+                    if artifacts:
+                        print(f"DEBUG - Found {len(artifacts)} data artifacts for message {row['id']}")
+                        message["data_artifacts"] = artifacts
+                        
+                        # For messages with dataframes, we'll add a placeholder dataframe
+                        # This ensures the UI knows to render a dataframe component
+                        for artifact in artifacts:
+                            if artifact.get("type") == "dataframe":
+                                # We don't have the actual dataframe data, but we can indicate
+                                # that this message had a dataframe that can be regenerated
+                                message["dataframe"] = None
+                                print(f"DEBUG - Message {row['id']} had a dataframe artifact")
+                                
+                                # If we have sample data, create a preview dataframe
+                                if "metadata" in artifact and "sample_data" in artifact["metadata"]:
+                                    try:
+                                        sample_data = artifact["metadata"]["sample_data"]
+                                        if sample_data and len(sample_data) > 0:
+                                            # Create a preview dataframe with "(preview)" suffix in the message
+                                            message["content"] += "\n\n*(Preview data available)*"
+                                            print(f"DEBUG - Added preview indicator to message {row['id']}")
+                                    except Exception as e:
+                                        print(f"WARNING - Failed to process sample data: {str(e)}")
+                    else:
+                        print(f"DEBUG - No data artifacts found for message {row['id']} despite has_dataframe={row['has_dataframe']}, has_figure={row['has_figure']}")
+                
                 messages.append(message)
             
             print(f"DEBUG - Loaded {len(messages)} messages from pet_meta.message_log")
@@ -311,3 +591,83 @@ class Database:
                 error_msg += "\n\nYour query violates a constraint (like a unique key or foreign key). Please check your data and try again."
             
             return None, error_msg 
+
+    def store_data_artifact(self, message_id, artifact_type, metadata, query_text=None):
+        """Store a data artifact in the pet_meta.data_artifacts table"""
+        try:
+            print(f"DEBUG - Storing data artifact: type={artifact_type}, message_id={message_id}, has_query={query_text is not None}")
+            
+            # Convert metadata to JSON string
+            metadata_json = json.dumps(metadata)
+            
+            # Check if metadata has sample data
+            has_sample = "sample_data" in metadata and metadata["sample_data"] is not None
+            print(f"DEBUG - Artifact metadata has sample data: {has_sample}")
+            
+            # Insert the data artifact
+            result = self.execute_query(f"""
+                INSERT INTO pet_meta.data_artifacts 
+                (id, message_id, artifact_type, query_text, metadata)
+                VALUES (
+                    nextval('pet_meta.data_artifacts_seq'),
+                    {message_id if message_id is not None else 'NULL'},
+                    '{artifact_type}',
+                    $1,
+                    $2
+                )
+                RETURNING id
+            """, params=[query_text, metadata_json])
+            
+            # Get the artifact ID
+            artifact_db_id = None
+            if result is not None and isinstance(result, pd.DataFrame) and not result.empty:
+                artifact_db_id = result.iloc[0]['id']
+                print(f"DEBUG - Data artifact stored with ID: {artifact_db_id}")
+            
+            return artifact_db_id
+        except Exception as e:
+            error_msg = f"Failed to store data artifact: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Store artifact traceback: {traceback.format_exc()}")
+            return None
+
+    def update_data_artifact_message_id(self, artifact_id, message_id):
+        """Update the message_id for a data artifact"""
+        try:
+            print(f"DEBUG - Updating message_id for artifact {artifact_id} to {message_id}")
+            self.execute_query(f"""
+                UPDATE pet_meta.data_artifacts
+                SET message_id = {message_id}
+                WHERE id = {artifact_id}
+            """)
+            print(f"DEBUG - Updated message_id for artifact {artifact_id}")
+            return True
+        except Exception as e:
+            error_msg = f"Failed to update data artifact message_id: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Update artifact traceback: {traceback.format_exc()}")
+            return False
+
+    def purge_database(self):
+        """Completely reset the database by dropping and recreating all tables"""
+        try:
+            print("DEBUG - Purging database...")
+            
+            # Drop all tables and sequences
+            self.execute_query("DROP TABLE IF EXISTS pet_meta.data_artifacts")
+            self.execute_query("DROP TABLE IF EXISTS pet_meta.table_description")
+            self.execute_query("DROP TABLE IF EXISTS pet_meta.message_log")
+            self.execute_query("DROP SEQUENCE IF EXISTS pet_meta.data_artifacts_seq")
+            self.execute_query("DROP SEQUENCE IF EXISTS pet_meta.table_description_seq")
+            self.execute_query("DROP SEQUENCE IF EXISTS pet_meta.message_log_seq")
+            
+            # Recreate the schema
+            self._initialize_pet_meta_schema()
+            
+            print("DEBUG - Database purged successfully")
+            return True
+        except Exception as e:
+            error_msg = f"Failed to purge database: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Purge database traceback: {traceback.format_exc()}")
+            return False 
