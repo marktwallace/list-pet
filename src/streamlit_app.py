@@ -63,7 +63,19 @@ def display_message(message: dict):
                         msg_idx = messages.index(message)
                         plot_idx = message.get("plot_index", 0)
                         plot_msg_id = f"stored_plot_{msg_idx}_{plot_idx}"
-                    st.plotly_chart(message["figure"], use_container_width=True, key=plot_msg_id)
+                    
+                    # Use an expander for plots - open by default for newly generated content
+                    plot_title = "Plot"
+                    if "plot_spec" in message and "title" in message["plot_spec"]:
+                        plot_title = message["plot_spec"]["title"]
+                    
+                    with st.expander(f"📈 {plot_title}", expanded=True):
+                        st.plotly_chart(message["figure"], use_container_width=True, key=plot_msg_id)
+                        
+                        # If we have query_text, show it directly instead of in a nested expander
+                        if "query_text" in message:
+                            st.write("**SQL Query:**")
+                            st.code(message["query_text"], language="sql")
                 except Exception as e:
                     error_message = f"Error displaying plot: {str(e)}"
                     st.error(error_message)
@@ -78,7 +90,19 @@ def display_message(message: dict):
                         msg_idx = messages.index(message)
                         map_idx = message.get("map_index", 0)
                         map_msg_id = f"stored_map_{msg_idx}_{map_idx}"
-                    st.plotly_chart(message["map_figure"], use_container_width=True, key=map_msg_id)
+                    
+                    # Use an expander for maps - open by default for newly generated content
+                    map_title = "Map"
+                    if "map_spec" in message and "title" in message["map_spec"]:
+                        map_title = message["map_spec"]["title"]
+                    
+                    with st.expander(f"🗺️ {map_title}", expanded=True):
+                        st.plotly_chart(message["map_figure"], use_container_width=True, key=map_msg_id)
+                        
+                        # If we have query_text, show it directly instead of in a nested expander
+                        if "query_text" in message:
+                            st.write("**SQL Query:**")
+                            st.code(message["query_text"], language="sql")
                 except Exception as e:
                     error_message = f"Error displaying map: {str(e)}"
                     st.error(error_message)
@@ -88,13 +112,31 @@ def display_message(message: dict):
             # Handle actual dataframes
             elif "dataframe" in message and isinstance(message["dataframe"], pd.DataFrame):
                 df = message["dataframe"]
-                with st.expander("View Data", expanded=True):
+                
+                # Determine a good title for the dataframe expander
+                df_title = "Data"
+                if "query_text" in message:
+                    # Try to extract table name from query
+                    table_name = extract_table_name_from_sql(message["query_text"])
+                    if table_name:
+                        df_title = f"Data from {table_name}"
+                
+                # Use an expander for dataframes - open by default for newly generated content
+                with st.expander(f"📊 {df_title}", expanded=True):
                     st.dataframe(
                         df,
                         use_container_width=True,
                         hide_index=True,
                         column_config={ col: st.column_config.Column(width="auto") for col in df.columns }
                     )
+                    
+                    # Show row and column count
+                    st.caption(f"{len(df)} rows × {len(df.columns)} columns")
+                    
+                    # If we have query_text, show it directly instead of in a nested expander
+                    if "query_text" in message:
+                        st.write("**SQL Query:**")
+                        st.code(message["query_text"], language="sql")
             
             # Handle recovered artifacts that need regeneration
             elif message.get("had_data_artifact") and "data_artifacts" in message:
@@ -118,7 +160,7 @@ def display_recoverable_artifacts(message, message_manager):
     print(f"DEBUG - Displaying recoverable artifacts for message: {message.get('message_id')}")
     print(f"DEBUG - Data artifacts: {len(message.get('data_artifacts', []))}")
     
-    st.info("This message contained data that can be regenerated")
+    # No need for the info message anymore as we'll use expanders with clear titles
     
     for artifact in message["data_artifacts"]:
         artifact_type = artifact.get("type", "unknown")
@@ -131,110 +173,130 @@ def display_recoverable_artifacts(message, message_manager):
         if artifact != message["data_artifacts"][0]:
             st.divider()
         
-        # Show artifact type with an icon
+        # Determine the expander title based on artifact type
         if artifact_type == "dataframe":
-            st.subheader("📊 Dataframe", divider="gray")
+            # Try to extract table name from query for a better title
+            expander_title = "📊 Dataframe"
+            if query_text:
+                table_name = extract_table_name_from_sql(query_text)
+                if table_name:
+                    expander_title = f"📊 Data from {table_name}"
         elif artifact_type == "plot":
-            st.subheader("📈 Plot", divider="gray")
+            expander_title = "📈 Plot"
+            # Check if we have plot title in metadata
+            if "metadata" in artifact and "plot_spec" in artifact["metadata"]:
+                plot_spec = artifact["metadata"]["plot_spec"]
+                if "title" in plot_spec:
+                    expander_title = f"📈 {plot_spec['title']}"
         elif artifact_type == "map":
-            st.subheader("🗺️ Map", divider="gray")
+            expander_title = "🗺️ Map"
+            # Check if we have map title in metadata
+            if "metadata" in artifact and "map_spec" in artifact["metadata"]:
+                map_spec = artifact["metadata"]["map_spec"]
+                if "title" in map_spec:
+                    expander_title = f"🗺️ {map_spec['title']}"
         else:
-            st.subheader(f"📄 {artifact_type.capitalize()}", divider="gray")
+            expander_title = f"📄 {artifact_type.capitalize()}"
         
-        # Add a button to regenerate the data - moved to top for better visibility
-        if query_text:
-            st.write("**Regenerate this data:**")
-            button_key = f"regen_{artifact.get('id')}"
-            print(f"DEBUG - Button key: {button_key}")
-            regenerate = st.button(
-                f"Regenerate {artifact_type.capitalize()}", 
-                key=button_key,
-                type="primary",
-                use_container_width=True  # Make button full width
-            )
-            print(f"DEBUG - Button created with key: {button_key}")
-        else:
-            st.warning("Cannot regenerate this data (no SQL query available)")
-            print(f"DEBUG - No query_text available for artifact {artifact.get('id')}, cannot add regenerate button")
+        # Add recovery indicator to the title
+        expander_title += " (Recoverable)"
         
-        # Show artifact metadata
-        if "metadata" in artifact:
-            metadata = artifact.get("metadata", {})
-            print(f"DEBUG - Metadata: {metadata}")
-            
-            # Display basic metadata directly
-            if "columns" in metadata:
-                st.caption(f"Columns: {', '.join(metadata['columns'])}")
-            if "shape" in metadata:
-                st.caption(f"Data shape: {metadata['shape'][0]} rows × {metadata['shape'][1]} columns")
-            
-            # For dataframes, show a preview of the structure and sample data if available
-            if artifact_type == "dataframe" and "columns" in metadata:
-                # Show sample data if available
-                if "sample_data" in metadata and metadata["sample_data"]:
-                    print(f"DEBUG - Sample data available: {len(metadata['sample_data'])} rows")
-                    st.write("**Data Preview:**")
-                    try:
-                        # Convert sample data to dataframe
-                        sample_df = pd.DataFrame(metadata["sample_data"])
+        # Create an expander for this artifact - closed by default for recovered content
+        with st.expander(expander_title, expanded=False):
+            # Show metadata
+            if "metadata" in artifact:
+                metadata = artifact.get("metadata", {})
+                print(f"DEBUG - Metadata: {metadata}")
+                
+                # Display basic metadata
+                if "columns" in metadata:
+                    st.caption(f"Columns: {', '.join(metadata['columns'])}")
+                if "shape" in metadata:
+                    st.caption(f"Data shape: {metadata['shape'][0]} rows × {metadata['shape'][1]} columns")
+                
+                # For dataframes, show a preview of the structure and sample data if available
+                if artifact_type == "dataframe" and "columns" in metadata:
+                    # Show sample data if available
+                    if "sample_data" in metadata and metadata["sample_data"]:
+                        print(f"DEBUG - Sample data available: {len(metadata['sample_data'])} rows")
+                        st.write("**Data Preview:**")
+                        try:
+                            # Convert sample data to dataframe
+                            sample_df = pd.DataFrame(metadata["sample_data"])
+                            st.dataframe(
+                                sample_df,
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                            st.caption("(Preview of first few rows - regenerate to see full data)")
+                        except Exception as e:
+                            error_msg = f"Could not display data preview: {str(e)}"
+                            st.warning(error_msg)
+                            print(f"ERROR - {error_msg}")
+                    else:
+                        print("DEBUG - No sample data available, showing structure preview")
+                        # Show structure preview if no sample data
+                        st.write("**Data Structure Preview:**")
+                        # Create a sample dataframe structure
+                        cols = metadata["columns"]
+                        sample_data = {col: ["..."] for col in cols}
+                        sample_df = pd.DataFrame(sample_data)
                         st.dataframe(
                             sample_df,
                             use_container_width=True,
                             hide_index=True
                         )
-                        st.caption("(Preview of first few rows - regenerate to see full data)")
-                    except Exception as e:
-                        error_msg = f"Could not display data preview: {str(e)}"
-                        st.warning(error_msg)
-                        print(f"ERROR - {error_msg}")
-                else:
-                    print("DEBUG - No sample data available, showing structure preview")
-                    # Show structure preview if no sample data
-                    st.write("**Data Structure Preview:**")
-                    # Create a sample dataframe structure
-                    cols = metadata["columns"]
-                    sample_data = {col: ["..."] for col in cols}
-                    sample_df = pd.DataFrame(sample_data)
-                    st.dataframe(
-                        sample_df,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-            
-            # For plots, show plot type and key parameters
-            if artifact_type == "plot" and "plot_spec" in metadata:
-                plot_spec = metadata["plot_spec"]
-                plot_type = plot_spec.get("type", "unknown")
-                st.caption(f"Plot type: {plot_type}")
                 
-                # Show key plot parameters
-                params = []
-                for key in ["x", "y", "color", "size", "title"]:
-                    if key in plot_spec:
-                        params.append(f"{key}={plot_spec[key]}")
-                if params:
-                    st.caption(f"Parameters: {', '.join(params)}")
-            
-            # For maps, show map type and key parameters
-            if artifact_type == "map" and "map_spec" in metadata:
-                map_spec = metadata["map_spec"]
-                map_type = map_spec.get("type", "unknown")
-                st.caption(f"Map type: {map_type}")
+                # For plots, show plot type and key parameters
+                if artifact_type == "plot" and "plot_spec" in metadata:
+                    plot_spec = metadata["plot_spec"]
+                    plot_type = plot_spec.get("type", "unknown")
+                    st.caption(f"Plot type: {plot_type}")
+                    
+                    # Show key plot parameters
+                    params = []
+                    for key in ["x", "y", "color", "size", "title"]:
+                        if key in plot_spec:
+                            params.append(f"{key}={plot_spec[key]}")
+                    if params:
+                        st.caption(f"Parameters: {', '.join(params)}")
                 
-                # Show key map parameters
-                params = []
-                for key in ["lat", "lon", "color", "size", "title", "locations", "geojson"]:
-                    if key in map_spec:
-                        params.append(f"{key}={map_spec[key]}")
-                if params:
-                    st.caption(f"Parameters: {', '.join(params)}")
-        
-        if query_text:
-            # Use a single expander for the SQL query
-            with st.expander("SQL Query"):
+                # For maps, show map type and key parameters
+                if artifact_type == "map" and "map_spec" in metadata:
+                    map_spec = metadata["map_spec"]
+                    map_type = map_spec.get("type", "unknown")
+                    st.caption(f"Map type: {map_type}")
+                    
+                    # Show key map parameters
+                    params = []
+                    for key in ["lat", "lon", "color", "size", "title", "locations", "geojson"]:
+                        if key in map_spec:
+                            params.append(f"{key}={map_spec[key]}")
+                    if params:
+                        st.caption(f"Parameters: {', '.join(params)}")
+            
+            # Add regeneration button inside the expander
+            if query_text:
+                st.write("**Regenerate this data:**")
+                button_key = f"regen_{artifact.get('id')}"
+                print(f"DEBUG - Button key: {button_key}")
+                regenerate = st.button(
+                    f"Regenerate {artifact_type.capitalize()}", 
+                    key=button_key,
+                    type="primary",
+                    use_container_width=True  # Make button full width
+                )
+                print(f"DEBUG - Button created with key: {button_key}")
+                
+                # Show SQL query
+                st.write("**SQL Query:**")
                 st.code(query_text, language="sql")
+            else:
+                st.warning("Cannot regenerate this data (no SQL query available)")
+                print(f"DEBUG - No query_text available for artifact {artifact.get('id')}, cannot add regenerate button")
             
-            if regenerate:
+            # Handle regeneration
+            if query_text and 'regenerate' in locals() and regenerate:
                 print(f"DEBUG - Regenerate button clicked for {artifact_type}")
                 with st.spinner(f"Regenerating {artifact_type}..."):
                     try:
