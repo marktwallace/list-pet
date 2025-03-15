@@ -2,53 +2,6 @@ import re
 import pandas as pd
 from .database import Database
 
-def format_sql_result(query: str, df: pd.DataFrame | None, error: str | None) -> tuple[str, pd.DataFrame | None]:
-    """Format SQL results in a consistent way, returning both display text and dataframe."""
-    output = []
-    output.append(f"```sql\n{query}\n```")
-    
-    if error:
-        # For actual errors, show as errors
-        if error.startswith("SQL Error:"):
-            output.append("Error:")
-            output.append(f"```\n{error}\n```")
-        # For informational messages, show as results
-        else:
-            output.append("Result:")
-            output.append(f"```\n{error}\n```")
-        return "\n".join(output), None
-    elif df is not None:
-        tsv_output = []
-        tsv_output.append("\t".join(df.columns))
-        for _, row in df.iterrows():
-            tsv_output.append("\t".join(str(val) for val in row))
-        
-        output.append("Result:")
-        output.append("```tsv\n" + "\n".join(tsv_output) + "\n```")
-        return "\n".join(output), df
-    else:
-        # Handle case where there's no error and no dataframe
-        # This happens for successful operations that don't return data
-        output.append("Result:")
-        
-        # Determine the appropriate message based on the query type
-        if query.strip().upper().startswith("CREATE"):
-            output.append("```\nCREATE operation completed. No data to display.\n```")
-        elif query.strip().upper().startswith("INSERT"):
-            output.append("```\nINSERT operation completed. No data to display.\n```")
-        elif query.strip().upper().startswith("UPDATE"):
-            output.append("```\nUPDATE operation completed. No data to display.\n```")
-        elif query.strip().upper().startswith("DELETE"):
-            output.append("```\nDELETE operation completed. No data to display.\n```")
-        elif query.strip().upper().startswith("DROP"):
-            output.append("```\nDROP operation completed. No data to display.\n```")
-        elif query.strip().upper().startswith("ALTER"):
-            output.append("```\nALTER operation completed. No data to display.\n```")
-        else:
-            output.append("```\nOperation completed. No data to display.\n```")
-    
-    return "\n".join(output), None
-
 def is_sql_query(text: str) -> bool:
     """Check if text is SQL (either explicit <sql> tag or common SQL patterns)."""
     text = text.strip()
@@ -66,13 +19,6 @@ def is_sql_query(text: str) -> bool:
         r")\s*.*",
         text, re.IGNORECASE
     ))
-
-def execute_sql(query: str, db: Database) -> tuple[str, bool, pd.DataFrame | None]:
-    """Execute SQL and return (formatted_result, had_error, dataframe)."""
-    df, error = db.execute_query(query)
-    result, df = format_sql_result(query, df, error)
-    # Only consider it an error if the error message starts with "SQL Error:"
-    return result, bool(error and error.startswith("SQL Error:")), df
 
 def format_sql_label(sql: str, max_length: int = 45) -> str:
     """Format SQL query into a concise label for the expander."""
@@ -123,4 +69,106 @@ def extract_table_name_from_sql(sql: str) -> str:
         if match:
             return match.group(1)
     
-    return "" 
+    return ""
+
+def is_command(text: str) -> bool:
+    """Check if text is a command (starts with /)."""
+    return text.strip().startswith("/")
+
+def handle_command(command: str) -> str:
+    """Handle a command and return the result."""
+    command = command.strip()
+    
+    if command.startswith("/help"):
+        return """
+Available commands:
+/help - Show this help message
+/tables - List all tables
+/schema <table_name> - Show schema for a table
+/count <table_name> - Count rows in a table
+/sample <table_name> [limit] - Show sample rows from a table
+"""
+    
+    elif command.startswith("/tables"):
+        db = Database()
+        tables = db.get_tables()
+        if not tables:
+            return "No tables found in the database."
+        return "Tables in the database:\n" + "\n".join(f"- {table}" for table in tables)
+    
+    elif command.startswith("/schema"):
+        parts = command.split(maxsplit=1)
+        if len(parts) < 2:
+            return "Usage: /schema <table_name>"
+        
+        table_name = parts[1].strip()
+        db = Database()
+        schema = db.get_table_schema(table_name)
+        
+        if not schema:
+            return f"Table '{table_name}' not found or has no columns."
+        
+        result = f"Schema for table '{table_name}':\n"
+        for col in schema:
+            result += f"- {col['name']} ({col['type']})"
+            if col.get('pk'):
+                result += " PRIMARY KEY"
+            if col.get('notnull'):
+                result += " NOT NULL"
+            result += "\n"
+        
+        return result
+    
+    elif command.startswith("/count"):
+        parts = command.split(maxsplit=1)
+        if len(parts) < 2:
+            return "Usage: /count <table_name>"
+        
+        table_name = parts[1].strip()
+        db = Database()
+        try:
+            count = db.get_table_row_count(table_name)
+            return f"Table '{table_name}' has {count} rows."
+        except Exception as e:
+            return f"Error counting rows in '{table_name}': {str(e)}"
+    
+    elif command.startswith("/sample"):
+        parts = command.split(maxsplit=2)
+        if len(parts) < 2:
+            return "Usage: /sample <table_name> [limit]"
+        
+        table_name = parts[1].strip()
+        limit = 5  # Default limit
+        
+        if len(parts) >= 3:
+            try:
+                limit = int(parts[2])
+            except ValueError:
+                return f"Invalid limit: {parts[2]}. Please provide a number."
+        
+        db = Database()
+        try:
+            df, error = db.execute_query(f"SELECT * FROM {table_name} LIMIT {limit}")
+            if error:
+                return f"Error sampling '{table_name}': {error}"
+            
+            if df is None or df.empty:
+                return f"No data found in table '{table_name}'."
+            
+            # Format as a simple text table
+            result = f"Sample data from '{table_name}' (limit {limit}):\n\n"
+            
+            # Add header
+            result += " | ".join(str(col) for col in df.columns) + "\n"
+            result += "-" * (sum(len(str(col)) for col in df.columns) + 3 * (len(df.columns) - 1)) + "\n"
+            
+            # Add rows
+            for _, row in df.iterrows():
+                result += " | ".join(str(val) for val in row) + "\n"
+            
+            return result
+        except Exception as e:
+            return f"Error sampling '{table_name}': {str(e)}"
+    
+    else:
+        return f"Unknown command: {command}. Type /help for available commands." 

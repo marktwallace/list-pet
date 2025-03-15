@@ -6,7 +6,8 @@ import pandas as pd
 # Add the src directory to the path so we can import modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.sql_utils import is_sql_query, execute_sql, extract_table_name_from_sql, format_sql_label
+from src.sql_utils import is_sql_query, extract_table_name_from_sql, format_sql_label
+from src.message_manager import MessageManager
 from src.test_config import TEST_INIT_SQL, reset_test_database, TestDatabase
 
 class TestSQLUtils(unittest.TestCase):
@@ -17,6 +18,10 @@ class TestSQLUtils(unittest.TestCase):
         
         # Create a fresh database instance
         self.db = TestDatabase()
+        
+        # Create a message manager instance
+        self.message_manager = MessageManager()
+        self.message_manager.db = self.db  # Use the test database
         
         # Initialize with test data
         for sql in TEST_INIT_SQL:
@@ -45,13 +50,13 @@ class TestSQLUtils(unittest.TestCase):
     def test_execute_sql(self):
         """Test SQL execution"""
         # Test successful query
-        result, had_error, df = execute_sql("SELECT * FROM test_table", self.db)
+        result, had_error, df = self.message_manager.execute_sql("SELECT * FROM test_table", self.db)
         self.assertFalse(had_error)
         self.assertIsNotNone(df)
         self.assertEqual(len(df), 3)
         
         # Test query with error
-        result, had_error, df = execute_sql("SELECT * FROM nonexistent_table", self.db)
+        result, had_error, df = self.message_manager.execute_sql("SELECT * FROM nonexistent_table", self.db)
         self.assertTrue(had_error)
         self.assertIn("nonexistent_table", result)
     

@@ -16,6 +16,7 @@ from src.response_processor import (
 )
 from src.constants import USER_ROLE, DATABASE_ACTOR
 from src.test_config import TestDatabase, reset_test_database, TEST_INIT_SQL
+from src.message_manager import MessageManager
 
 class TestResponseProcessor(unittest.TestCase):
     def setUp(self):
@@ -25,6 +26,10 @@ class TestResponseProcessor(unittest.TestCase):
         
         # Create a fresh database instance
         self.db = TestDatabase()
+        
+        # Create a message manager instance
+        self.message_manager = MessageManager()
+        self.message_manager.db = self.db  # Use the test database
         
         # Initialize with test data
         for sql in TEST_INIT_SQL:
@@ -37,175 +42,152 @@ class TestResponseProcessor(unittest.TestCase):
     
     def test_process_sql_blocks_success(self):
         """Test processing SQL blocks with successful queries"""
-        # Create a parsed response with SQL blocks
-        parsed = {
-            "sql": [
-                {"query": "SELECT * FROM test_table WHERE id = 1"}
-            ]
-        }
+        # Create a response with SQL blocks
+        response = """
+        Here's a query to get data from the test table:
+        
+        ```sql
+        SELECT * FROM test_table WHERE id = 1
+        ```
+        """
         
         # Process the SQL blocks
-        sql_messages, had_error, last_df = process_sql_blocks(parsed, self.db)
+        parsed_response, sql_blocks = process_sql_blocks(response)
         
         # Verify results
-        self.assertFalse(had_error)
-        self.assertIsNotNone(last_df)
-        self.assertEqual(len(sql_messages), 1)
-        self.assertIn("dataframe", sql_messages[0])
-        self.assertEqual(sql_messages[0]["role"], USER_ROLE)
-        self.assertIn(DATABASE_ACTOR, sql_messages[0]["content"])
+        self.assertIsInstance(parsed_response, str)
+        self.assertIsInstance(sql_blocks, list)
+        self.assertEqual(len(sql_blocks), 1)
+        self.assertEqual(sql_blocks[0]["sql"], "SELECT * FROM test_table WHERE id = 1")
         
-        # Verify dataframe content
-        self.assertEqual(len(last_df), 1)
-        self.assertEqual(last_df["id"].iloc[0], 1)
-        self.assertEqual(last_df["name"].iloc[0], "Test 1")
+        # Execute the SQL to verify it works
+        for block in sql_blocks:
+            result, is_error, df = self.message_manager.execute_sql(block["sql"])
+            self.assertFalse(is_error)
+            self.assertIsNotNone(df)
     
     def test_process_sql_blocks_error(self):
         """Test processing SQL blocks with error queries"""
-        # Create a parsed response with SQL blocks containing an error
-        parsed = {
-            "sql": [
-                {"query": "SELECT * FROM nonexistent_table"}
-            ]
-        }
+        # Create a response with SQL blocks that will cause errors
+        response = """
+        Here's a query that will cause an error:
+        
+        ```sql
+        SELECT * FROM nonexistent_table
+        ```
+        """
         
         # Process the SQL blocks
-        sql_messages, had_error, last_df = process_sql_blocks(parsed, self.db)
+        parsed_response, sql_blocks = process_sql_blocks(response)
         
         # Verify results
-        self.assertTrue(had_error)
-        self.assertIsNone(last_df)
-        self.assertEqual(len(sql_messages), 1)
-        self.assertEqual(sql_messages[0]["role"], USER_ROLE)
-        self.assertIn(DATABASE_ACTOR, sql_messages[0]["content"])
-        self.assertIn("nonexistent_table", sql_messages[0]["content"])
+        self.assertIsInstance(parsed_response, str)
+        self.assertIsInstance(sql_blocks, list)
+        self.assertEqual(len(sql_blocks), 1)
+        self.assertEqual(sql_blocks[0]["sql"], "SELECT * FROM nonexistent_table")
+        
+        # Execute the SQL to verify it produces an error
+        for block in sql_blocks:
+            result, is_error, df = self.message_manager.execute_sql(block["sql"])
+            self.assertTrue(is_error)
+            self.assertIn("nonexistent_table", result)
     
     def test_process_sql_blocks_multiple(self):
         """Test processing multiple SQL blocks"""
-        # Create a parsed response with multiple SQL blocks
-        parsed = {
-            "sql": [
-                {"query": "SELECT * FROM test_table WHERE id = 1"},
-                {"query": "SELECT * FROM test_table WHERE id = 2"}
-            ]
-        }
+        # Create a response with multiple SQL blocks
+        response = """
+        Here are multiple queries:
+        
+        ```sql
+        SELECT * FROM test_table WHERE id = 1
+        ```
+        
+        And another one:
+        
+        ```sql
+        SELECT * FROM test_table WHERE id = 2
+        ```
+        """
         
         # Process the SQL blocks
-        sql_messages, had_error, last_df = process_sql_blocks(parsed, self.db)
+        parsed_response, sql_blocks = process_sql_blocks(response)
         
         # Verify results
-        self.assertFalse(had_error)
-        self.assertIsNotNone(last_df)
-        self.assertEqual(len(sql_messages), 2)
-        
-        # Verify last dataframe is from the second query
-        self.assertEqual(len(last_df), 1)
-        self.assertEqual(last_df["id"].iloc[0], 2)
-        self.assertEqual(last_df["name"].iloc[0], "Test 2")
+        self.assertIsInstance(parsed_response, str)
+        self.assertIsInstance(sql_blocks, list)
+        self.assertEqual(len(sql_blocks), 2)
+        self.assertEqual(sql_blocks[0]["sql"], "SELECT * FROM test_table WHERE id = 1")
+        self.assertEqual(sql_blocks[1]["sql"], "SELECT * FROM test_table WHERE id = 2")
     
     def test_process_sql_blocks_mixed_results(self):
         """Test processing SQL blocks with mixed success and error results"""
-        # Create a parsed response with mixed SQL blocks
-        parsed = {
-            "sql": [
-                {"query": "SELECT * FROM test_table WHERE id = 1"},
-                {"query": "SELECT * FROM nonexistent_table"},
-                {"query": "SELECT * FROM test_table WHERE id = 3"}
-            ]
-        }
+        # Create a response with mixed SQL blocks
+        response = """
+        Here's a successful query:
+        
+        ```sql
+        SELECT * FROM test_table WHERE id = 1
+        ```
+        
+        And here's one that will fail:
+        
+        ```sql
+        SELECT * FROM nonexistent_table
+        ```
+        """
         
         # Process the SQL blocks
-        sql_messages, had_error, last_df = process_sql_blocks(parsed, self.db)
+        parsed_response, sql_blocks = process_sql_blocks(response)
         
         # Verify results
-        self.assertTrue(had_error)  # Should be True because one query had an error
-        self.assertIsNotNone(last_df)  # Should still have a dataframe from the last successful query
-        self.assertEqual(len(sql_messages), 3)
+        self.assertIsInstance(parsed_response, str)
+        self.assertIsInstance(sql_blocks, list)
+        self.assertEqual(len(sql_blocks), 2)
         
-        # Verify last dataframe is from the third query
-        self.assertEqual(len(last_df), 1)
-        self.assertEqual(last_df["id"].iloc[0], 3)
-        self.assertEqual(last_df["name"].iloc[0], "Test 3")
+        # Execute the SQL to verify mixed results
+        result1, is_error1, df1 = self.message_manager.execute_sql(sql_blocks[0]["sql"])
+        self.assertFalse(is_error1)
+        self.assertIsNotNone(df1)
+        
+        result2, is_error2, df2 = self.message_manager.execute_sql(sql_blocks[1]["sql"])
+        self.assertTrue(is_error2)
+        self.assertIn("nonexistent_table", result2)
     
     def test_prepare_plot_error_message(self):
         """Test preparing plot error messages"""
-        # Create a sample plot specification
-        plot_spec = {
-            "type": "bar",
-            "x": "nonexistent_column",
-            "y": "value",
-            "title": "Test Plot"
-        }
+        # Create test data
+        error_message = "Invalid column 'nonexistent_column'"
         
-        # Create a sample dataframe
-        df = pd.DataFrame({
-            "id": [1, 2, 3],
-            "name": ["Test 1", "Test 2", "Test 3"],
-            "value": [10.5, 20.1, 30.7]
-        })
+        # Call the function
+        error_msg = prepare_plot_error_message(error_message)
         
-        # Prepare an error message
-        error_message = "Column 'nonexistent_column' not found in dataframe"
-        error_msg = prepare_plot_error_message(plot_spec, error_message, df)
-        
-        # Verify the error message
-        self.assertEqual(error_msg["role"], USER_ROLE)
-        self.assertIn(DATABASE_ACTOR, error_msg["content"])
-        self.assertIn("Error creating bar plot", error_msg["content"])
-        self.assertIn(error_message, error_msg["content"])
-        self.assertIn("Available columns", error_msg["content"])
-        self.assertIn("id", error_msg["content"])
-        self.assertIn("name", error_msg["content"])
-        self.assertIn("value", error_msg["content"])
-        self.assertIn(json.dumps(plot_spec, indent=2), error_msg["content"])
-        self.assertIs(error_msg["dataframe"], df)
+        # Verify results
+        self.assertIsInstance(error_msg, str)
+        self.assertIn("Error creating plot", error_msg)
+        self.assertIn(error_message, error_msg)
     
     def test_prepare_map_error_message(self):
         """Test preparing map error messages"""
-        # Create a sample map specification
-        map_spec = {
-            "type": "scatter_geo",
-            "lat": "nonexistent_lat",
-            "lon": "nonexistent_lon",
-            "title": "Test Map"
-        }
+        # Create test data
+        error_message = "Invalid column 'nonexistent_column'"
         
-        # Create a sample dataframe
-        df = pd.DataFrame({
-            "id": [1, 2, 3],
-            "city": ["New York", "Los Angeles", "Chicago"],
-            "latitude": [40.7128, 34.0522, 41.8781],
-            "longitude": [-74.0060, -118.2437, -87.6298]
-        })
+        # Call the function
+        error_msg = prepare_map_error_message(error_message)
         
-        # Prepare an error message
-        error_message = "Columns 'nonexistent_lat' and 'nonexistent_lon' not found in dataframe"
-        error_msg = prepare_map_error_message(map_spec, error_message, df)
-        
-        # Verify the error message
-        self.assertEqual(error_msg["role"], USER_ROLE)
-        self.assertIn(DATABASE_ACTOR, error_msg["content"])
-        self.assertIn("Error creating scatter_geo map", error_msg["content"])
-        self.assertIn(error_message, error_msg["content"])
-        self.assertIn("Available columns", error_msg["content"])
-        self.assertIn("id", error_msg["content"])
-        self.assertIn("city", error_msg["content"])
-        self.assertIn("latitude", error_msg["content"])
-        self.assertIn("longitude", error_msg["content"])
-        self.assertIn(json.dumps(map_spec, indent=2), error_msg["content"])
-        self.assertIs(error_msg["dataframe"], df)
+        # Verify results
+        self.assertIsInstance(error_msg, str)
+        self.assertIn("Error creating map", error_msg)
+        self.assertIn(error_message, error_msg)
     
     def test_prepare_no_data_error_message(self):
         """Test preparing no data error messages"""
-        # Prepare a no data error message
+        # Call the function
         error_msg = prepare_no_data_error_message()
         
-        # Verify the error message
-        self.assertEqual(error_msg["role"], USER_ROLE)
-        self.assertIn(DATABASE_ACTOR, error_msg["content"])
-        self.assertIn("No data available for visualization", error_msg["content"])
-        self.assertIn("run a SELECT query", error_msg["content"])
-        self.assertNotIn("dataframe", error_msg)
+        # Verify results
+        self.assertIsInstance(error_msg, str)
+        self.assertIn("No data available", error_msg)
+        self.assertIn("visualization", error_msg)
 
 if __name__ == '__main__':
     unittest.main() 

@@ -1,4 +1,5 @@
 import re
+import json
 
 def parse_markup(text: str) -> dict:
     """Parse the AI response into structured components using regex parsing."""
@@ -25,13 +26,24 @@ def parse_markup(text: str) -> dict:
             continue
         elif in_plot_tag:
             plot_lines.append(line)
-            if line.endswith('/>'):
+            if line.endswith('</plot>') or line.endswith('/>'):
                 # Process complete plot tag
                 in_plot_tag = False
-                full_plot_tag = ' '.join(plot_lines)
+                full_plot_tag = '\n'.join(plot_lines)
                 
-                # Parse the complete plot tag
-                plot_match = re.match(r'<plot(.*?)>', full_plot_tag)
+                # Try to parse as JSON inside <plot> tags
+                json_match = re.search(r'<plot>\s*(\{.*?\})\s*</plot>', full_plot_tag, re.DOTALL)
+                if json_match:
+                    try:
+                        plot_spec = json.loads(json_match.group(1))
+                        components['plot'].append(plot_spec)
+                        continue
+                    except json.JSONDecodeError:
+                        # If JSON parsing fails, fall back to attribute parsing
+                        pass
+                
+                # Parse the complete plot tag with attributes
+                plot_match = re.search(r'<plot\s+(.*?)(?:/>|>)', full_plot_tag, re.DOTALL)
                 if plot_match:
                     attrs = plot_match.group(1).strip()
                     plot_attrs = {}
@@ -54,13 +66,24 @@ def parse_markup(text: str) -> dict:
             continue
         elif in_map_tag:
             map_lines.append(line)
-            if line.endswith('/>'):
+            if line.endswith('</map>') or line.endswith('/>'):
                 # Process complete map tag
                 in_map_tag = False
-                full_map_tag = ' '.join(map_lines)
+                full_map_tag = '\n'.join(map_lines)
+                
+                # Try to parse as JSON inside <map> tags
+                json_match = re.search(r'<map>\s*(\{.*?\})\s*</map>', full_map_tag, re.DOTALL)
+                if json_match:
+                    try:
+                        map_spec = json.loads(json_match.group(1))
+                        components['map'].append(map_spec)
+                        continue
+                    except json.JSONDecodeError:
+                        # If JSON parsing fails, fall back to attribute parsing
+                        pass
                 
                 # Parse the complete map tag
-                map_match = re.match(r'<map(.*?)>', full_map_tag)
+                map_match = re.search(r'<map\s+(.*?)(?:/>|>)', full_map_tag, re.DOTALL)
                 if map_match:
                     attrs = map_match.group(1).strip()
                     map_attrs = {}

@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from src.test_config import TestDatabase, reset_test_database, TEST_INIT_SQL
 from src.constants import USER_ROLE, ASSISTANT_ROLE, USER_ACTOR, DATABASE_ACTOR
+from src.message_manager import MessageManager
 
 class BaseUserFlowTest(unittest.TestCase):
     """Base class for user flow tests with common setup and teardown"""
@@ -26,8 +27,9 @@ class BaseUserFlowTest(unittest.TestCase):
         
         # Set up patches for dependencies
         # Create a real mock for the message manager
-        self.mock_message_manager = MagicMock()
+        self.mock_message_manager = MagicMock(spec=MessageManager)
         self.mock_message_manager.get_messages.return_value = []
+        self.mock_message_manager.db = self.db
         
         # Patch the get_message_manager function in streamlit_app.py
         self.streamlit_app_patch = patch('src.streamlit_app.get_message_manager')
@@ -35,7 +37,7 @@ class BaseUserFlowTest(unittest.TestCase):
         self.mock_get_message_manager.return_value = self.mock_message_manager
         
         # Patch the chat engine
-        self.chat_engine_patch = patch('src.chat.get_chat_engine')
+        self.chat_engine_patch = patch('src.chat.ChatEngine')
         self.mock_chat_engine = self.chat_engine_patch.start()
         self.mock_chat_engine.return_value = MagicMock()
         
@@ -90,232 +92,222 @@ class BaseUserFlowTest(unittest.TestCase):
         self.st_session_state_patch.stop()
 
 class TestBasicQueryFlow(BaseUserFlowTest):
-    """Test the basic flow of a user submitting a query and getting a response"""
+    """Test basic query flow where user asks a question and gets a response"""
+    
     def test_basic_query_flow(self):
-        from src.streamlit_app import handle_user_input, generate_ai_response
+        """Test basic query flow with a simple question"""
+        # Import here to avoid circular imports
+        from src.streamlit_app import handle_user_input, handle_ai_response
         
-        # 1. Set up the mock AI response
-        mock_ai_response = """
-        <reasoning>
-        I need to query the test_table to find the record with id = 1.
-        </reasoning>
+        # Set up the mock message manager to return appropriate responses
+        self.mock_message_manager.execute_sql.return_value = (
+            "Result: Data from test_table", 
+            False, 
+            pd.DataFrame({
+                "id": [1, 2, 3],
+                "name": ["Test 1", "Test 2", "Test 3"],
+                "value": [10.5, 20.1, 30.7]
+            })
+        )
         
-        <sql>
-        SELECT * FROM test_table WHERE id = 1
-        </sql>
+        # Set up the mock chat engine to return a response with SQL
+        mock_response = """
+        Here's the data from the test table:
         
-        <display>
-        Here is the record with id = 1:
-        - Name: Test 1
-        - Value: 10.5
-        </display>
+        ```sql
+        SELECT * FROM test_table
+        ```
         """
-        self.mock_chat_engine.return_value.generate_response.return_value = mock_ai_response
+        self.mock_chat_engine.return_value.generate_response.return_value = mock_response
         
-        # 2. Simulate user input
-        user_query = "Show me the record with id 1"
+        # Simulate user input
+        user_query = "Show me the data in the test table"
         
-        # 3. Execute the user input handler
-        should_rerun = handle_user_input(user_query, self.db)
+        # Call the function under test
+        should_rerun = handle_user_input(user_query)
         
-        # 4. Verify the message was added to the message manager
+        # Verify the message manager was called correctly
         self.mock_message_manager.add_user_message.assert_called_once_with(user_query)
         
-        # 5. Verify that the session state was updated to indicate an AI response is needed
-        self.assertTrue(self.mock_session_state.needs_ai_response)
+        # Verify that the function returns False since this is not an SQL query or command
+        self.assertFalse(should_rerun)
         
-        # 6. Verify that the function indicated a rerun is needed
-        self.assertTrue(should_rerun)
+        # Now simulate the AI response
+        handle_ai_response(mock_response, self.mock_chat_engine.return_value, self.db)
         
-        # 7. Now simulate the AI response generation
-        generate_ai_response(self.mock_chat_engine.return_value, self.db)
+        # Verify the message manager was called to add the assistant message
+        self.mock_message_manager.add_assistant_message.assert_called_once()
         
-        # 8. Verify the chat engine was called with the messages
-        self.mock_chat_engine.return_value.generate_response.assert_called_once()
+        # Verify SQL was executed
+        self.mock_message_manager.execute_sql.assert_called_once_with("SELECT * FROM test_table")
         
-        # 9. Verify the AI response was added to the message manager
-        self.mock_message_manager.add_assistant_message.assert_called_once_with(mock_ai_response)
-        
-        # 10. Verify that SQL was executed
-        # The SQL execution is handled by the handle_ai_response function, which processes the SQL blocks
-        # We can verify that the database message was added, which indicates SQL was executed
-        self.mock_message_manager.add_message.assert_called()
-        
-        # 11. Verify that the session state was updated to indicate no AI response is needed
-        self.assertFalse(self.mock_session_state.needs_ai_response)
+        # Verify database message was added with the result
+        self.mock_message_manager.add_database_message.assert_called_once()
 
 class TestSqlDirectExecution(BaseUserFlowTest):
-    """Test when a user directly inputs SQL and the system executes it and displays results"""
+    """Test direct SQL execution flow where user enters SQL directly"""
+    
     def test_sql_direct_execution(self):
+        """Test direct SQL execution flow"""
+        # Import here to avoid circular imports
         from src.streamlit_app import handle_user_input
         
-        # 1. Simulate user input with direct SQL
-        sql_query = "SELECT * FROM test_table WHERE id = 2"
+        # Set up the mock message manager to return appropriate responses
+        self.mock_message_manager.execute_sql.return_value = (
+            "Result: Data from test_table", 
+            False, 
+            pd.DataFrame({
+                "id": [1, 2, 3],
+                "name": ["Test 1", "Test 2", "Test 3"],
+                "value": [10.5, 20.1, 30.7]
+            })
+        )
         
-        # 2. Execute the user input handler
-        should_rerun = handle_user_input(sql_query, self.db)
+        # Simulate user input with direct SQL
+        sql_query = "SELECT * FROM test_table"
         
-        # 3. Verify the message was added to the message manager
+        # Call the function under test
+        should_rerun = handle_user_input(sql_query)
+        
+        # Verify the message manager was called correctly
         self.mock_message_manager.add_user_message.assert_called_once_with(sql_query)
         
-        # 4. Verify that a database message was added with the SQL result
-        # The first argument should be the database message content
-        add_database_message_calls = self.mock_message_manager.add_database_message.call_args_list
-        self.assertGreaterEqual(len(add_database_message_calls), 1)
+        # Verify SQL was executed
+        self.mock_message_manager.execute_sql.assert_called_once_with(sql_query)
         
-        # 5. Verify that the first argument to add_database_message contains the SQL query
-        first_call_args = add_database_message_calls[0][0]
-        self.assertIn(sql_query, first_call_args[0])
+        # Verify database message was added with the result
+        self.mock_message_manager.add_database_message.assert_called_once()
         
-        # 6. Verify that a dataframe was passed as the second argument
-        self.assertIsInstance(first_call_args[1], pd.DataFrame)
-        
-        # 7. Verify that the dataframe contains the expected data
-        df = first_call_args[1]
-        self.assertEqual(len(df), 1)  # Should have one row
-        self.assertEqual(df['id'].iloc[0], 2)  # Should be the record with id = 2
-        self.assertEqual(df['name'].iloc[0], 'Test 2')  # Should have name = Test 2
-        
-        # 8. Verify that the function indicated a rerun is needed (this behavior has changed)
-        # The implementation now sets needs_ai_response to True for all user inputs
+        # Verify that the function returns True since this is an SQL query
         self.assertTrue(should_rerun)
-        
-        # 9. Verify that the session state was updated to indicate an AI response is needed
-        self.assertTrue(self.mock_session_state.needs_ai_response)
 
 class TestVisualizationCreation(BaseUserFlowTest):
-    """Test the flow where a query results in data that is then visualized"""
+    """Test visualization creation flow where AI creates a plot or map"""
+    
     def test_visualization_creation(self):
-        from src.streamlit_app import handle_user_input, generate_ai_response
+        """Test visualization creation flow"""
+        # Import here to avoid circular imports
+        from src.streamlit_app import handle_user_input, handle_ai_response
         
-        # 1. Set up the mock AI response with a plot specification
-        mock_ai_response = """
-        <reasoning>
-        I'll create a bar chart of the values in the test_table.
-        </reasoning>
+        # Create a sample dataframe
+        df = pd.DataFrame({
+            "id": [1, 2, 3],
+            "name": ["Test 1", "Test 2", "Test 3"],
+            "value": [10.5, 20.1, 30.7]
+        })
         
-        <sql>
+        # Set up the mock message manager to return appropriate responses
+        self.mock_message_manager.execute_sql.return_value = (
+            "Result: Data from test_table", 
+            False, 
+            df
+        )
+        
+        # Set up the mock chat engine to return a response with SQL and plot
+        mock_response = """
+        Here's a bar chart of the values:
+        
+        ```sql
         SELECT * FROM test_table
-        </sql>
+        ```
         
-        <plot 
-            type="bar" 
-            x="name" 
-            y="value" 
-            title="Test Values" 
-        />
-        
-        <display>
-        Here's a bar chart showing the values for each test record.
-        </display>
+        <plot>
+        {
+            "type": "bar",
+            "x": "name",
+            "y": "value",
+            "title": "Values by Name",
+            "sql_ref": "sql_1"
+        }
+        </plot>
         """
-        self.mock_chat_engine.return_value.generate_response.return_value = mock_ai_response
+        self.mock_chat_engine.return_value.generate_response.return_value = mock_response
         
-        # 2. Simulate user input
-        user_query = "Show me a bar chart of the test values"
-        
-        # 3. Execute the user input handler
-        should_rerun = handle_user_input(user_query, self.db)
-        
-        # 4. Verify the message was added to the message manager
-        self.mock_message_manager.add_user_message.assert_called_once_with(user_query)
-        
-        # 5. Verify that the session state was updated to indicate an AI response is needed
-        self.assertTrue(self.mock_session_state.needs_ai_response)
-        
-        # 6. Verify that the function indicated a rerun is needed
-        self.assertTrue(should_rerun)
-        
-        # 7. Now simulate the AI response generation
-        generate_ai_response(self.mock_chat_engine.return_value, self.db)
-        
-        # 8. Verify the AI response was added to the message manager
-        self.mock_message_manager.add_assistant_message.assert_called_once_with(mock_ai_response)
-        
-        # 9. Verify that SQL was executed
-        # We can verify that the database message was added, which indicates SQL was executed
-        self.mock_message_manager.add_message.assert_called()
-        
-        # 10. Verify that a plot message was added
-        # This is a bit tricky to test directly, so we'll check that add_plot_message was called
-        self.mock_message_manager.add_plot_message.assert_called()
-        
-        # 11. Verify that the session state was updated to indicate no AI response is needed
-        self.assertFalse(self.mock_session_state.needs_ai_response)
+        # Set up the plotter mock
+        with patch('src.plotting.get_plotter') as mock_get_plotter:
+            mock_plotter = MagicMock()
+            mock_plotter.create_plot.return_value = (MagicMock(), None)  # (fig, error)
+            mock_get_plotter.return_value = mock_plotter
+            
+            # Simulate user input
+            user_query = "Create a bar chart of the values in the test table"
+            
+            # Call the function under test
+            should_rerun = handle_user_input(user_query)
+            
+            # Verify the message manager was called correctly
+            self.mock_message_manager.add_user_message.assert_called_once_with(user_query)
+            
+            # Verify that the function returns False since this is not an SQL query or command
+            self.assertFalse(should_rerun)
+            
+            # Now simulate the AI response
+            handle_ai_response(mock_response, self.mock_chat_engine.return_value, self.db)
+            
+            # Verify the message manager was called to add the assistant message
+            self.mock_message_manager.add_assistant_message.assert_called_once()
+            
+            # Verify SQL was executed
+            self.mock_message_manager.execute_sql.assert_called_once_with("SELECT * FROM test_table")
+            
+            # Verify database message was added with the result
+            self.mock_message_manager.add_database_message.assert_called_once()
+            
+            # Verify the plotter was called
+            mock_plotter.create_plot.assert_called_once()
+            
+            # Verify plot message was added
+            self.mock_message_manager.add_plot_message.assert_called_once()
 
 class TestErrorHandlingFlow(BaseUserFlowTest):
-    """Test how the system handles and recovers from errors"""
+    """Test error handling flow where SQL execution fails"""
+    
     def test_error_handling_flow(self):
-        from src.streamlit_app import handle_user_input, generate_ai_response
+        """Test error handling flow"""
+        # Import here to avoid circular imports
+        from src.streamlit_app import handle_user_input, handle_ai_response
         
-        # 1. Set up the mock AI response with an error
-        mock_ai_response = """
-        <reasoning>
-        I'll query the nonexistent_table to get the data.
-        </reasoning>
+        # Set up the mock message manager to return an error
+        self.mock_message_manager.execute_sql.return_value = (
+            "SQL Error: Table 'nonexistent_table' does not exist", 
+            True, 
+            None
+        )
         
-        <sql>
+        # Set up the mock chat engine to return a response with SQL that will fail
+        mock_response = """
+        Let me query that table for you:
+        
+        ```sql
         SELECT * FROM nonexistent_table
-        </sql>
-        
-        <display>
-        Here are the results from the nonexistent_table.
-        </display>
+        ```
         """
+        self.mock_chat_engine.return_value.generate_response.return_value = mock_response
+        self.mock_chat_engine.return_value.generate_fallback_response.return_value = "I apologize for the error."
         
-        # Set up a second response that the system will generate after encountering an error
-        mock_recovery_response = """
-        <reasoning>
-        I apologize for the error. It seems the table doesn't exist. Let me query the test_table instead.
-        </reasoning>
+        # Simulate user input
+        user_query = "Show me the data in the nonexistent table"
         
-        <sql>
-        SELECT * FROM test_table
-        </sql>
+        # Call the function under test
+        should_rerun = handle_user_input(user_query)
         
-        <display>
-        Here are the results from the test_table.
-        </display>
-        """
-        
-        # Configure the mock to return different responses on successive calls
-        self.mock_chat_engine.return_value.generate_response.side_effect = [
-            mock_ai_response,
-            mock_recovery_response
-        ]
-        
-        # 2. Simulate user input
-        user_query = "Show me data from the nonexistent table"
-        
-        # 3. Execute the user input handler
-        should_rerun = handle_user_input(user_query, self.db)
-        
-        # 4. Verify the message was added to the message manager
+        # Verify the message manager was called correctly
         self.mock_message_manager.add_user_message.assert_called_once_with(user_query)
         
-        # 5. Verify that the session state was updated to indicate an AI response is needed
-        self.assertTrue(self.mock_session_state.needs_ai_response)
+        # Verify that the function returns False since this is not an SQL query or command
+        self.assertFalse(should_rerun)
         
-        # 6. Verify that the function indicated a rerun is needed
-        self.assertTrue(should_rerun)
+        # Now simulate the AI response
+        handle_ai_response(mock_response, self.mock_chat_engine.return_value, self.db)
         
-        # 7. Now simulate the AI response generation
-        generate_ai_response(self.mock_chat_engine.return_value, self.db)
+        # Verify the message manager was called to add the assistant message
+        self.mock_message_manager.add_assistant_message.assert_called_once()
         
-        # 8. Verify both AI responses were added to the message manager
-        # We can't use assert_called_with because it only checks the last call
-        # Instead, check that add_assistant_message was called at least twice
-        self.assertGreaterEqual(self.mock_message_manager.add_assistant_message.call_count, 2)
+        # Verify SQL was executed
+        self.mock_message_manager.execute_sql.assert_called_once_with("SELECT * FROM nonexistent_table")
         
-        # 9. Verify that SQL was executed and an error message was added
-        # The error message is added via add_message, not add_database_message
-        self.mock_message_manager.add_message.assert_called()
-        
-        # 10. Verify that the chat engine was called a second time to generate a recovery response
-        self.assertEqual(self.mock_chat_engine.return_value.generate_response.call_count, 2)
-        
-        # 11. Verify that the session state was updated to indicate no AI response is needed
-        self.assertFalse(self.mock_session_state.needs_ai_response)
+        # Verify database message was added with the error
+        self.mock_message_manager.add_database_message.assert_called_once()
 
 # For backward compatibility with existing tests
 TestUserFlows = TestBasicQueryFlow

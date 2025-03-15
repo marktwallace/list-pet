@@ -107,4 +107,25 @@ class ChatEngine:
             error_msg = f"Error parsing response: {str(e)}"
             print(f"ERROR - {error_msg}")
             print(f"ERROR - Response parsing traceback: {traceback.format_exc()}")
-            raise RuntimeError(f"Failed to parse response: {str(e)}. The response format might be invalid.") 
+            raise RuntimeError(f"Failed to parse response: {str(e)}. The response format might be invalid.")
+    
+    def generate_fallback_response(self) -> str:
+        """Generate a simpler fallback response when the main response fails."""
+        try:
+            fallback_message = """
+            I apologize, but I encountered an issue while processing your request. 
+            
+            Let me try to provide a simpler response without complex SQL queries or visualizations. 
+            
+            If you're trying to work with data, please try breaking down your request into smaller steps:
+            1. First, query the data you need with a simple SELECT statement
+            2. Then, we can work on analyzing or visualizing that data
+            
+            Feel free to ask me to explain any SQL concepts or help you formulate a simpler query.
+            """
+            return fallback_message
+        except Exception as e:
+            error_msg = f"Error generating fallback response: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Fallback response generation traceback: {traceback.format_exc()}")
+            raise RuntimeError(f"Failed to generate fallback response: {str(e)}.") 
