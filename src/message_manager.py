@@ -130,9 +130,14 @@ class MessageManager:
         if plot_spec:
             metadata["plot_spec"] = plot_spec
         
+        # Create a descriptive title for the plot
+        plot_title = "Plot created successfully"
+        if plot_spec and "title" in plot_spec:
+            plot_title = f"Plot: {plot_spec['title']}"
+        
         message = {
             "role": USER_ROLE, 
-            "content": f"{DATABASE_ACTOR}:\nPlot created successfully", 
+            "content": f"{DATABASE_ACTOR}:\n{plot_title}", 
             "dataframe": dataframe,
             "figure": figure,
             "plot_index": plot_index,
@@ -184,9 +189,14 @@ class MessageManager:
         if map_spec:
             metadata["map_spec"] = map_spec
         
+        # Create a descriptive title for the map
+        map_title = "Map created successfully"
+        if map_spec and "title" in map_spec:
+            map_title = f"Map: {map_spec['title']}"
+        
         message = {
             "role": USER_ROLE, 
-            "content": f"{DATABASE_ACTOR}:\nMap created successfully", 
+            "content": f"{DATABASE_ACTOR}:\n{map_title}", 
             "dataframe": dataframe,
             "map_figure": map_figure,
             "map_index": map_index,

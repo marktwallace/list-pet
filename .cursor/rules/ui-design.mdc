@@ -1,0 +1,47 @@
+---
+description: UI design guidelines for streamlit
+globs: 
+alwaysApply: false
+---
+---
+description: 
+globs: 
+alwaysApply: false
+---
+
+# UI Guidelines for List Pet
+
+## Core Principles
+- Clean UI with minimal redundancy
+- Use expanders for organization (avoid nesting)
+- Consistent visual hierarchy and labeling
+- Save expander states through st.rerun()
+
+## Message Components & Display Order
+1. Main message text (brief, descriptive)
+2. SQL Query expander (collapsed by default)
+   - Label: "SQL: [first line of query]"
+   - Use syntax highlighting with "sql" language tag
+3. Results expander
+   - Label: "Result: [status/preview]"
+   - Content varies by operation type (see below)
+4. Additional artifacts (dataframes, plots, maps)
+
+## Operation-Specific Display
+- CREATE/DROP/ALTER: Simple success message
+- SELECT with data: 
+  - Display as Streamlit dataframe (not raw TSV/CSV)
+  - Include row/column counts
+  - Title should include table name when possible
+- Errors: Use st.error() with clear messages
+
+## Recoverable Artifacts
+- Use closed expanders labeled with "(Recoverable)"
+- Include full-width "Regenerate" button at top
+- Show SQL query and relevant metadata inside
+
+## Visual Elements
+- Dataframes: Initially expanded, descriptive title
+- Plots/Maps: Initially expanded, reference source dataframe
+- Icons: 📊 for dataframes, 📈 for plots, 🗺️ for maps
+- Terminology: Use "Output" instead of "Result" 

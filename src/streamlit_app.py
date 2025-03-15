@@ -39,21 +39,93 @@ def display_message(message: dict):
         # Handle database actor messages (SQL results, plots, maps)
         content = message.get("content", "")
         if content.startswith(f"{DATABASE_ACTOR}:"):
-            # Display the content text
-            st.markdown(content)
+            # Extract the main message content without SQL blocks or results
+            clean_content = re.sub(r"```(?:sql)?\s*\n?.*?\n?```", "", content, flags=re.DOTALL)
+            clean_content = re.sub(r"Result:.*?(?=\n\n|\Z)", "", clean_content, flags=re.DOTALL)
+            clean_content = re.sub(r"No data to display", "", clean_content, flags=re.DOTALL)
+            clean_content = clean_content.strip()
+            
+            # Display the cleaned content text (main message)
+            if clean_content:
+                st.markdown(clean_content)
             
             # Handle SQL query display
             sql_match = re.search(r"```(?:sql)?\s*\n?(.*?)\n?```", content, re.DOTALL)
             if sql_match:
                 sql_query = sql_match.group(1).strip()
-                with st.expander(format_sql_label(sql_query)):
+                first_line = sql_query.split('\n')[0].strip()
+                with st.expander(f"SQL: {first_line}", expanded=False):
                     st.markdown(f"```sql\n{sql_query}\n```")
+                
+                # Check if we have a dataframe in the message object
+                if "dataframe" in message and isinstance(message["dataframe"], pd.DataFrame):
+                    # If we have a dataframe, we'll display it below, so we don't need to show the text result
+                    pass
+                else:
+                    # Extract and display result separately if no dataframe is available
+                    result_match = re.search(r"Result:(.*?)(?=\n\n|\Z)", content, flags=re.DOTALL)
+                    if result_match:
+                        result_text = result_match.group(1).strip()
+                        
+                        # Check if this is a SELECT result with TSV/CSV data
+                        if "```tsv" in result_text or "```csv" in result_text:
+                            # Try to convert the TSV/CSV text to a dataframe
+                            try:
+                                # Extract the TSV/CSV content
+                                tsv_match = re.search(r"```(?:tsv|csv)\n(.*?)\n```", result_text, re.DOTALL)
+                                if tsv_match:
+                                    tsv_content = tsv_match.group(1).strip()
+                                    lines = tsv_content.split('\n')
+                                    if len(lines) > 0:
+                                        # Parse the header and data
+                                        headers = lines[0].split('\t')
+                                        data = []
+                                        for line in lines[1:]:
+                                            if line.strip():
+                                                data.append(line.split('\t'))
+                                        
+                                        # Create a dataframe
+                                        df = pd.DataFrame(data, columns=headers)
+                                        
+                                        # Determine a good title for the dataframe expander
+                                        df_title = "Data"
+                                        if sql_query:
+                                            # Try to extract table name from query
+                                            table_name = extract_table_name_from_sql(sql_query)
+                                            if table_name:
+                                                df_title = f"Data from {table_name}"
+                                        
+                                        # Display as Streamlit dataframe
+                                        with st.expander(f"📊 {df_title}", expanded=True):
+                                            st.dataframe(
+                                                df,
+                                                use_container_width=True,
+                                                hide_index=True,
+                                                column_config={ col: st.column_config.Column(width="auto") for col in df.columns }
+                                            )
+                                            
+                                            # Show row and column count
+                                            st.caption(f"{len(df)} rows × {len(df.columns)} columns")
+                                            
+                                            # No need to show SQL query again as it's already shown above
+                                        
+                                        # Skip the text-based result display by returning early
+                                        return
+                            except Exception as e:
+                                print(f"ERROR - Failed to convert TSV/CSV to dataframe: {str(e)}")
+                                # Fall back to text display
+                        
+                        # For non-TSV/CSV results or if conversion failed
+                        result_preview = result_text.split('\n')[0].strip() if result_text else "success, no data"
+                        if result_text and "No data to display" not in result_text:
+                            with st.expander(f"Result: {result_preview}", expanded=True):
+                                st.markdown(f"**Output:**\n```output\n{result_text}\n```")
             
             # Handle error messages
             if "Error:" in content:
                 error_match = re.search(r"Error:.*?```(.*?)```", content, re.DOTALL)
                 if error_match:
-                    st.markdown(f"```\n{error_match.group(1).strip()}\n```")
+                    st.error(f"```\n{error_match.group(1).strip()}\n```")
             
             # Handle actual figures (plots)
             if "figure" in message:
@@ -72,10 +144,12 @@ def display_message(message: dict):
                     with st.expander(f"📈 {plot_title}", expanded=True):
                         st.plotly_chart(message["figure"], use_container_width=True, key=plot_msg_id)
                         
-                        # If we have query_text, show it directly instead of in a nested expander
-                        if "query_text" in message:
-                            st.write("**SQL Query:**")
-                            st.code(message["query_text"], language="sql")
+                        # Show row and column counts if we have dataframe
+                        if "dataframe" in message and message["dataframe"] is not None:
+                            df = message["dataframe"]
+                            st.caption(f"{len(df)} rows × {len(df.columns)} columns")
+                        
+                        # No need to show SQL query again as it's already shown above
                 except Exception as e:
                     error_message = f"Error displaying plot: {str(e)}"
                     st.error(error_message)
@@ -99,10 +173,12 @@ def display_message(message: dict):
                     with st.expander(f"🗺️ {map_title}", expanded=True):
                         st.plotly_chart(message["map_figure"], use_container_width=True, key=map_msg_id)
                         
-                        # If we have query_text, show it directly instead of in a nested expander
-                        if "query_text" in message:
-                            st.write("**SQL Query:**")
-                            st.code(message["query_text"], language="sql")
+                        # Show row and column counts if we have dataframe
+                        if "dataframe" in message and message["dataframe"] is not None:
+                            df = message["dataframe"]
+                            st.caption(f"{len(df)} rows × {len(df.columns)} columns")
+                        
+                        # No need to show SQL query again as it's already shown above
                 except Exception as e:
                     error_message = f"Error displaying map: {str(e)}"
                     st.error(error_message)
@@ -133,10 +209,7 @@ def display_message(message: dict):
                     # Show row and column count
                     st.caption(f"{len(df)} rows × {len(df.columns)} columns")
                     
-                    # If we have query_text, show it directly instead of in a nested expander
-                    if "query_text" in message:
-                        st.write("**SQL Query:**")
-                        st.code(message["query_text"], language="sql")
+                    # No need to show SQL query again as it's already shown above
             
             # Handle recovered artifacts that need regeneration
             elif message.get("had_data_artifact") and "data_artifacts" in message:
@@ -159,8 +232,6 @@ def display_recoverable_artifacts(message, message_manager):
     """Display recoverable artifacts with regeneration options."""
     print(f"DEBUG - Displaying recoverable artifacts for message: {message.get('message_id')}")
     print(f"DEBUG - Data artifacts: {len(message.get('data_artifacts', []))}")
-    
-    # No need for the info message anymore as we'll use expanders with clear titles
     
     for artifact in message["data_artifacts"]:
         artifact_type = artifact.get("type", "unknown")
@@ -203,6 +274,26 @@ def display_recoverable_artifacts(message, message_manager):
         
         # Create an expander for this artifact - closed by default for recovered content
         with st.expander(expander_title, expanded=False):
+            # Add regeneration button at the top of the expander
+            if query_text:
+                button_key = f"regen_{artifact.get('id')}"
+                print(f"DEBUG - Button key: {button_key}")
+                regenerate = st.button(
+                    f"Regenerate {artifact_type.capitalize()}", 
+                    key=button_key,
+                    type="primary",
+                    use_container_width=True  # Make button full width
+                )
+                print(f"DEBUG - Button created with key: {button_key}")
+            
+            # Show SQL query
+            if query_text:
+                st.write("**SQL Query:**")
+                st.code(query_text, language="sql")
+            else:
+                st.warning("Cannot regenerate this data (no SQL query available)")
+                print(f"DEBUG - No query_text available for artifact {artifact.get('id')}, cannot add regenerate button")
+            
             # Show metadata
             if "metadata" in artifact:
                 metadata = artifact.get("metadata", {})
@@ -274,26 +365,6 @@ def display_recoverable_artifacts(message, message_manager):
                             params.append(f"{key}={map_spec[key]}")
                     if params:
                         st.caption(f"Parameters: {', '.join(params)}")
-            
-            # Add regeneration button inside the expander
-            if query_text:
-                st.write("**Regenerate this data:**")
-                button_key = f"regen_{artifact.get('id')}"
-                print(f"DEBUG - Button key: {button_key}")
-                regenerate = st.button(
-                    f"Regenerate {artifact_type.capitalize()}", 
-                    key=button_key,
-                    type="primary",
-                    use_container_width=True  # Make button full width
-                )
-                print(f"DEBUG - Button created with key: {button_key}")
-                
-                # Show SQL query
-                st.write("**SQL Query:**")
-                st.code(query_text, language="sql")
-            else:
-                st.warning("Cannot regenerate this data (no SQL query available)")
-                print(f"DEBUG - No query_text available for artifact {artifact.get('id')}, cannot add regenerate button")
             
             # Handle regeneration
             if query_text and 'regenerate' in locals() and regenerate:
@@ -522,7 +593,7 @@ def handle_user_input(user_input: str, db: Database) -> bool:
             result = handle_command(cmd_type, cmd_label)
             with st.chat_message(USER_ROLE):
                 st.markdown(f"{USER_ACTOR}: {user_input}")
-            with st.expander("Command Output (not saved to conversation)", expanded=True):
+            with st.expander("Command Output", expanded=True):
                 st.text(result)
             return False
         except Exception as e:
