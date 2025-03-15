@@ -1,8 +1,3 @@
----
-description: Testing Guidelines
-globs: 
-alwaysApply: false
----
 # List Pet Testing Guidelines
 
 ## Testing Strategy
@@ -74,4 +69,4 @@ When adding new test classes:
 
 1. Create a new test file in the `tests` directory
 2. Import the test class in `run_tests.py`
-3. Add the test class to the test suite in the `run_tests()` function
+3. Add the test class to the test suite in the `run_tests()` function 

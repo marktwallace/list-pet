@@ -4,10 +4,49 @@ globs:
 alwaysApply: false
 ---
 
-# Coding guidelines
+# Coding Guidelines
 
-- Always prefer simple solutions.
-- Avoid duplication of code. Check existing code for similar functionality and patterns. Safely refactor existing code for the new use if possible, as long as it does not break existing functionality.
-- Only make changes that are requested or that you are confident are well understood and related to the change being requested.
-- When fixing a bug, do not first introduce a new pattern or technology without first exhausting all options for the existing implementation.
-- Keep the codebase clean and organized. Keep the code concise by avoiding repetition and encapsulating common patterns.
+## Application Architecture
+
+The application follows a component-based architecture with these key components:
+
+1. **Core Components**
+   - `database.py`: Database connection and query execution
+   - `chat.py`: Chat engine interface
+   - `parse.py`: Response parsing
+
+2. **UI Components**
+   - `message_display.py`: Display logic for all message types
+   - `visualization.py`: Plot and map generation and display
+
+3. **Data Management**
+   - `message_manager.py`: Message storage and retrieval
+   - `artifact_manager.py`: Data artifact handling
+
+## Code Organization Principles
+
+1. **Single Responsibility**: Each module should have a single responsibility
+2. **Interface Segregation**: Define clear interfaces between components
+3. **Dependency Inversion**: High-level modules should not depend on low-level modules
+4. **Don't Repeat Yourself**: Extract common patterns into reusable functions
+
+## Message Handling
+
+Messages follow a consistent structure:
+- `role`: Either "user" or "assistant"
+- `content`: The text content of the message
+- Additional fields for data artifacts (dataframe, figure, etc.)
+
+## Data Artifact Handling
+
+Data artifacts (dataframes, plots, maps) are:
+1. Stored in the database as metadata and query text
+2. Displayed in the UI with appropriate controls
+3. Regenerated on demand using the stored query
+
+## Error Handling
+
+All errors should be:
+1. Logged with appropriate context
+2. Displayed to the user in a friendly format
+3. Handled gracefully to prevent application crashes
