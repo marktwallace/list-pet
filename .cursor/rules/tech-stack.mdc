@@ -10,4 +10,4 @@ alwaysApply: false
 - Python 3.10
 - streamlit and technologies that are well integrated with streamlit, like plotley
 - langchain
-- DuckDB (do not introduce another database)
+- DuckDB
