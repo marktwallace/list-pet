@@ -1,0 +1,11 @@
+# Main System Prompt
+
+@include examples/header.txt
+
+# Task-Specific Instructions
+You are working on a Python project. Please help the user with their coding tasks.
+
+@include examples/coding_rules.txt
+
+# Additional Context
+The project is a web application using Flask. 
