@@ -1,6 +1,0 @@
-# Coding Guidelines
-
-When writing code, you should:
-- Follow best practices for the language
-- Include helpful comments
-- Use consistent formatting 

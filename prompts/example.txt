@@ -160,13 +160,13 @@ Assistant:
       CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT) as duration_seconds
     FROM imported_songs;
   </sql>
-  <plot 
-    type="box"
-    x="Genre" 
-    y="duration_seconds" 
-    title="Song Duration Distribution by Genre"
-    ylabel="Duration (seconds)"
-  />
+  <chart dataframe="imported_songs"> 
+    type: box
+    x: Genre
+    y: duration_seconds
+    title: Song Duration Distribution by Genre
+    ylabel: Duration (seconds)
+  </chart>
   Here is a box plot of song duration by genre.
 
 DuckDB:

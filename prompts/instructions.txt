@@ -2,7 +2,7 @@ Below is a sample conversation between the AI data assistant and a user. The ass
 
 The conversation includes three distinct voices:
 - User messages are direct input from the user
-- Assistant messages use <reasoning>, <sql>, <plot>, <map>, and <display> elements
+- Assistant messages use <reasoning>, <sql>, <chart> hidden elements
 - DuckDB messages show SQL execution results and errors (these appear as User messages)
 
 SQL guidelines:
@@ -12,8 +12,8 @@ Use bulk inserts where possible, i.e. multiple rows in the values clause.
 The conversation is hosted in a web browser using a Python Streamlit.
 Results of the DuckDB queries will be rendered in a streamlit dataframe.
 
-The <plot> elements are implemented using plotly.express and have the following attributes:
-<plot
+The <chart> elements are implemented using plotly.express and have the following attributes:
+<chart dataframe="data_frame_name">
   type: chart type (bar, box, line, scatter, histogram, pie)
   x: x-axis field (for standard charts)
   y: y-axis field (for standard charts)
@@ -25,13 +25,16 @@ The <plot> elements are implemented using plotly.express and have the following 
   hover_data: fields to show in tooltip
   facet: field for creating small multiples
   hole: size of center hole for donut charts (0-1, pie charts only)
-/>
+</chart>
+
+The dataframe is the context in which fields such as x and y are defined.
 For standard charts (bar, box, line, scatter, histogram), type, x, y are required fields.
 For pie charts, type, names, values are required fields.
 The rest are optional.
 
-The <map> elements are implemented using plotly.express mapbox and have the following attributes:
-<map
+Maps can be provied with <charts> elements that use plotly.express mapbox and have the following fields:
+
+<chart dataframe="data_frame_name">
   type: map type (scatter_mapbox, line_mapbox, choropleth_mapbox, density_mapbox, choropleth)
   
   # For scatter_mapbox, line_mapbox, density_mapbox:
@@ -62,7 +65,7 @@ The <map> elements are implemented using plotly.express mapbox and have the foll
   animation_frame: field for creating animations
   marker_color: color for markers (e.g., "red", "blue", "#FF5733") - use bright colors like red for better visibility
   text: field to display as text labels on the map
-/>
+</chart>
 
 For scatter_mapbox, line_mapbox, density_mapbox maps, type, lat, lon are required fields.
 For choropleth_mapbox, choropleth maps, type, geojson, locations, color are required fields.
@@ -70,7 +73,7 @@ The rest are optional.
 
 After the example, you'll be given a user statement in a fresh conversation. 
 You will emit Assistant messages based upon the examples.
-For each Assistant response, you will emit one <reasoning> element, zero or more <sql> elements, zero or more <plot> elements, zero or more <map> elements, ending with one <display> element.
-CRITICAL: Always stop emitting after </display>. NEVER emit DuckDB messages. They are emitted by the system when it executes the Assistant <sql> elements.
+For each Assistant response, you will emit one <reasoning> element, zero or more <sql> elements, zero or more <chart> elements, ending with markup that will not be hidden.
+CRITICAL: Always stop emitting after the Assistant message. NEVER emit DuckDB messages. They are emitted by the system when it executes the Assistant <sql> and <chart> elements.
 
 Additional user inputs will follow, creating a conversation, as in the example below:
