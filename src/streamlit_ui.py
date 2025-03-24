@@ -56,6 +56,11 @@ def init_session_state(sess,db):
     sess.pending_chart = False
     sess.pending_sql = False
     sess.pending_response = False
+    # Initialize table counters and latest dataframes tracking
+    if "table_counters" not in sess:
+        sess.table_counters = {}
+    if "latest_dataframes" not in sess:
+        sess.latest_dataframes = {}
 
 def title_text(input):
     return input[:90] + "..." if len(input) > 60 else input
@@ -234,21 +239,40 @@ def main():
                 table_name = "unknown"
                 print(f"DEBUG - No table name detected for dataframe, using default: {table_name}")
             
-            content = f'<dataframe name="{table_name}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" >\n'
+            # Create a semantic identifier for the dataframe
+            # Initialize or increment the counter for this table
+            if table_name not in sess.table_counters:
+                sess.table_counters[table_name] = 1
+            else:
+                sess.table_counters[table_name] += 1
+            
+            # Create the semantic identifier
+            semantic_id = f"{table_name}_{sess.table_counters[table_name]}"
+            
+            # Update the latest dataframe reference for this table
+            sess.latest_dataframes[table_name] = semantic_id
+            
+            # Store dataframe in session state with semantic ID
+            dataframe_key = f"dataframe_{semantic_id}"
+            sess[dataframe_key] = df
+            print(f"DEBUG - Storing dataframe with semantic ID: {semantic_id}, key: {dataframe_key}")
+            
+            # Store provenance information
+            provenance_key = f"provenance_{semantic_id}"
+            sess[provenance_key] = {
+                "msg_idx": msg_idx,
+                "tag_idx": tag_idx,
+                "sql": sql,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Create the dataframe tag with semantic ID and provenance
+            content = f'<dataframe name="{semantic_id}" table="{table_name}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" >\n'
             content += "\n".join(tsv_output) + "\n"
             content += "</dataframe>\n"
             print(f"DEBUG - Adding dataframe message with content length: {len(content)}")
             add_message(role=USER_ROLE, content=content, db=db)
             
-            # Store both the dataframe and its provenance in session state
-            dataframe_key = "dataframe_" + table_name
-            print(f"DEBUG - Storing dataframe in session state with key: {dataframe_key}")
-            sess[dataframe_key] = df
-            
-            # Store provenance information separately
-            provenance_key = f"provenance_{table_name}"
-            sess[provenance_key] = {"msg_idx": msg_idx, "tag_idx": tag_idx}
-            print(f"DEBUG - Storing provenance information with key: {provenance_key}")
         elif err:
             content = f"<error>\n{err}\n</error>\n"
             add_message(role=USER_ROLE, content=content, db=db)
