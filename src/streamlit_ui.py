@@ -95,19 +95,32 @@ def main():
                             msg_idx = attributes.get("msg_idx")
                             tag_idx = attributes.get("tag_idx")
                             if msg_idx is not None and tag_idx is not None:
-                                print(f"DEBUG - Have msg_idx: {msg_idx} and tag_idx: {tag_idx}")
-                                msg_ref_content = sess.db_messages[msg_idx]["content"]
-                                msg_ref = get_elements(msg_ref_content)
-                                if arr := msg_ref.get("sql",[]) and tag_idx < len(arr):
-                                    sql = arr[tag_idx]
-                                    button_clicked = st.button(
-                                        "Regenerate Dataframe",
-                                        key=f"df_btn_{idx}",
-                                        type="primary",
-                                        use_container_width=True,
-                                    )
-                                else:
-                                    st.error("Missing sql for dataframe regeneration")
+                                try:
+                                    msg_idx = int(msg_idx)
+                                    tag_idx = int(tag_idx)
+                                    msg_ref_content = sess.db_messages[msg_idx]["content"]
+                                    msg_ref = get_elements(msg_ref_content)
+                                    arr = msg_ref.get("sql", [])
+                                    if arr and tag_idx < len(arr):
+                                        sql = arr[tag_idx]["content"]
+                                        # Store SQL for later use if button is clicked
+                                        button_key = f"df_btn_{idx}_{msg_idx}_{tag_idx}"
+                                        if st.button(
+                                            "Regenerate Dataframe",
+                                            key=button_key,
+                                            type="primary",
+                                            use_container_width=True,
+                                        ):
+                                            df, err = db.execute_query(sql)
+                                            if err:
+                                                print(f"ERROR - {err} for dataframe regeneration while rerunning SQL: {sql}")
+                                            else:
+                                                sess[key] = df
+                                                st.rerun()
+                                    else:
+                                        st.error("Missing sql for dataframe regeneration")
+                                except (ValueError, IndexError) as e:
+                                    st.error(f"Error processing dataframe indices: {str(e)}")
                             else:
                                 st.error("Missing msg_idx or tag_idx for dataframe")
 
@@ -115,7 +128,6 @@ def main():
                 for item in msg["error"]:
                     with st.expander(title_text(item["content"]), expanded=False):
                         st.code(item["content"])
-
 
             # title, chart, chart_key = get_chart(message, sess)
             # if title:
@@ -129,26 +141,6 @@ def main():
             #                 type="primary",
             #                 use_container_width=True,
             #             )
-
-    # Handle Button Clicks
-    for idx, message in enumerate(sess.db_messages):
-        msg = get_elements(message["content"])
-
-        if sess.get(f"df_btn_{idx}"):
-            sess[f"df_btn_{idx}"] = False
-            sql = sess[f"df_btn_{idx}_sql"]
-            df,err = db.execute_query(sql)
-            if err:
-                print(f"ERROR - {err} for dataframe regeneration while rerunning SQL: {sql} ")
-            else:
-                sess["dataframe_" + attributes.get("name")] = df
-                st.rerun()
-
-        # if sess.get(f"chart_btn_{idx}"):
-        #     sess[f"chart_btn_{idx}"] = False
-        #     st.write(f"Regenerating Chart for message {idx}...")
-        #     new_chart = regenerate_chart(message, sess)
-        #     st.rerun()
 
     if sess.pending_sql:
         # pop one sql message from the list, process it, then rerun()
@@ -187,12 +179,6 @@ def main():
         
         # Always rerun after processing a SQL query, regardless of result type
         st.rerun()
-
-    # if sess.pending_chart:
-    #     chart = sess.pending_chart.pop(0)
-    #     # response = generate_chart(chart)
-    #     # add_message(role=USER_ROLE, content=response)
-    #     # st.rerun()
 
     if sess.pending_response:
         sess.pending_response = False
