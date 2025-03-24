@@ -1,6 +1,10 @@
+from datetime import datetime
+import os
+import re
+
 import duckdb
 import streamlit as st
-import re
+
 from langchain_core.prompts import (
     SystemMessagePromptTemplate,
     HumanMessagePromptTemplate,
@@ -13,6 +17,8 @@ from langchain_core.output_parsers import StrOutputParser
 from .prompt_loader import get_prompts
 from .database import Database
 from .parsing import get_elements, SQL_REGEX
+
+logfile = None
 
 # Define roles
 USER_ROLE = "user"
@@ -29,6 +35,10 @@ def add_message(role, content, db):
     message = {"role": role, "content": content}
     st.session_state.db_messages.append(message)
     db.log_message(message)
+    global logfile
+    logfile.write(f"{role}:\n{content}\n\n")
+    logfile.flush()
+
     if role == USER_ROLE:
         st.session_state.lc_messages.append(HumanMessagePromptTemplate.from_template(content))
     elif role == ASSISTANT_ROLE:
@@ -51,6 +61,15 @@ def title_text(input):
     return input[:90] + "..." if len(input) > 60 else input
 
 def main():
+    # Create a new log file in the logs directory, with a suddirectory (MM-dd) for each day,
+    # named with the current hour and minute
+    global logfile
+    if logfile is None:
+        # Create logs directory and subdirectory if they don't exist
+        log_dir = f"logs/{datetime.now().strftime('%m-%d')}"
+        os.makedirs(log_dir, exist_ok=True)
+        logfile = open(f"{log_dir}/{datetime.now().strftime('%H-%M')}.log", "w")
+    
     sess = st.session_state
     if "conn" not in sess: # first time the app is run
         sess.conn = duckdb.connect('db/list_pet.db')
@@ -84,7 +103,7 @@ def main():
                     if not attributes.get("name"):
                         st.error("Dataframe must have a name")
                         continue
-                    with st.expander(title_text(attributes.get("name")), expanded=False):
+                    with st.expander(title_text(attributes.get("name")), expanded=True):
                         key = "dataframe_" + attributes.get("name")
                         if key in sess:
                             df = sess[key]
@@ -124,28 +143,77 @@ def main():
                             else:
                                 st.error("Missing msg_idx or tag_idx for dataframe")
 
+            if "figure" in msg:
+                for item in msg["figure"]:
+                    content = item["content"]
+                    attributes = item["attributes"]
+                    if not attributes.get("dataframe"):
+                        st.error("Figure must have a dataframe")
+                        continue
+                    
+                    dataframe_key = "dataframe_" + attributes.get("dataframe")
+                    figure_key = f"figure_{idx}_{attributes.get('dataframe')}"
+                    
+                    with st.expander(title_text(attributes.get("title", "Chart")), expanded=True):
+                        # Check if the referenced dataframe exists in session state
+                        if dataframe_key in sess:
+                            df = sess[dataframe_key]
+                            # Here you would render the figure using the dataframe
+                            # For now, we'll just display the dataframe
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+                            st.text("Figure would render here using the dataframe")
+                        else:
+                            # Dataframe doesn't exist, we need a regeneration button
+                            st.info(f"The dataframe '{attributes.get('dataframe')}' is not available. Click the button below to regenerate it.")
+                            
+                            msg_idx = attributes.get("msg_idx")
+                            tag_idx = attributes.get("tag_idx")
+                            
+                            if msg_idx is not None and tag_idx is not None:
+                                try:
+                                    msg_idx = int(msg_idx)
+                                    tag_idx = int(tag_idx)
+                                    msg_ref_content = sess.db_messages[msg_idx]["content"]
+                                    msg_ref = get_elements(msg_ref_content)
+                                    arr = msg_ref.get("sql", [])
+                                    
+                                    if arr and tag_idx < len(arr):
+                                        sql = arr[tag_idx]["content"]
+                                        # Create a button for regenerating the dataframe
+                                        button_key = f"fig_btn_{idx}_{msg_idx}_{tag_idx}"
+                                        if st.button(
+                                            "Regenerate Figure Data",
+                                            key=button_key,
+                                            type="primary",
+                                            use_container_width=True,
+                                        ):
+                                            df, err = db.execute_query(sql)
+                                            if err:
+                                                st.error(f"Error: {err}")
+                                                print(f"ERROR - {err} for figure dataframe regeneration while rerunning SQL: {sql}")
+                                            else:
+                                                # Store the dataframe in session state
+                                                dataframe_name = attributes.get("dataframe")
+                                                sess["dataframe_" + dataframe_name] = df
+                                                st.rerun()
+                                    else:
+                                        st.error("Missing SQL for figure dataframe regeneration")
+                                except (ValueError, IndexError) as e:
+                                    st.error(f"Error processing figure indices: {str(e)}")
+                            else:
+                                st.error("Missing msg_idx or tag_idx for figure dataframe")
+
             if "error" in msg:
                 for item in msg["error"]:
                     with st.expander(title_text(item["content"]), expanded=False):
                         st.code(item["content"])
 
-            # title, chart, chart_key = get_chart(message, sess)
-            # if title:
-            #     with st.expander(title, expanded=False):
-            #         if chart:
-            #             st.plotly_chart(chart, use_container_width=True, key=chart_key)
-            #         else:
-            #             button_clicked = st.button(
-            #                 "Regenerate Chart",
-            #                 key=f"chart_btn_{idx}",
-            #                 type="primary",
-            #                 use_container_width=True,
-            #             )
-
     if sess.pending_sql:
         # pop one sql message from the list, process it, then rerun()
         sql_tuple = sess.pending_sql.pop(0)
         print(f"DEBUG - sql_tuple: {sql_tuple}")
+        tag_idx = sql_tuple[0]
+        msg_idx = len(sess.db_messages) - 1
         sql = sql_tuple[1]["content"]
         df,err = db.execute_query(sql)
         if df is not None:
@@ -165,19 +233,62 @@ def main():
             else:
                 table_name = "unknown"
                 print(f"DEBUG - No table name detected for dataframe, using default: {table_name}")
-            msg_idx = len(sess.db_messages) - 1
-            content = f'<dataframe name="{table_name}" msg_idx="{msg_idx}" tag_idx="{sql_tuple[0]}" >\n'
+            
+            content = f'<dataframe name="{table_name}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" >\n'
             content += "\n".join(tsv_output) + "\n"
             content += "</dataframe>\n"
             print(f"DEBUG - Adding dataframe message with content length: {len(content)}")
             add_message(role=USER_ROLE, content=content, db=db)
-            print(f"DEBUG - Storing dataframe in session state with key: dataframe_{table_name}")
-            sess["dataframe_" + table_name] = df
+            
+            # Store both the dataframe and its provenance in session state
+            dataframe_key = "dataframe_" + table_name
+            print(f"DEBUG - Storing dataframe in session state with key: {dataframe_key}")
+            sess[dataframe_key] = df
+            
+            # Store provenance information separately
+            provenance_key = f"provenance_{table_name}"
+            sess[provenance_key] = {"msg_idx": msg_idx, "tag_idx": tag_idx}
+            print(f"DEBUG - Storing provenance information with key: {provenance_key}")
         elif err:
             content = f"<error>\n{err}\n</error>\n"
             add_message(role=USER_ROLE, content=content, db=db)
         
         # Always rerun after processing a SQL query, regardless of result type
+        st.rerun()
+
+    if sess.pending_chart:
+        chart_tuple = sess.pending_chart.pop(0)
+        print(f"DEBUG - chart_tuple: {chart_tuple}")
+        chart_idx = chart_tuple[0]
+        chart_content = chart_tuple[1]["content"]
+        chart_attrs = chart_tuple[1]["attributes"]
+        
+        # Get the referenced dataframe name
+        dataframe_name = chart_attrs.get("dataframe")
+        if not dataframe_name:
+            print("ERROR - Chart missing dataframe reference")
+            st.error("Chart missing dataframe reference")
+            st.rerun()
+        
+        # Look up the provenance information for this dataframe
+        provenance_key = f"provenance_{dataframe_name}"
+        if provenance_key in sess:
+            provenance = sess[provenance_key]
+            msg_idx = provenance.get("msg_idx")
+            tag_idx = provenance.get("tag_idx")
+            
+            # Now create a figure tag with complete provenance information
+            figure_content = f'<figure dataframe="{dataframe_name}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" title="{chart_attrs.get("title", "Chart")}">\n{chart_content}\n</figure>'
+            print(f"DEBUG - Creating figure with provenance: {figure_content}")
+            
+            # Add the figure message
+            add_message(role=ASSISTANT_ROLE, content=figure_content, db=db)
+        else:
+            print(f"ERROR - No provenance information found for dataframe: {dataframe_name}")
+            st.error(f"No provenance information found for dataframe: {dataframe_name}")
+
+        # sess[chart_key] = chart_content
+        
         st.rerun()
 
     if sess.pending_response:
