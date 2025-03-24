@@ -39,7 +39,7 @@ def get_elements(content):
             result[tag_name] = []
         result[tag_name].append({"content": tag_content, "attributes": attributes})
         
-    result["markdown"] = content
+    result["markdown"] = content.strip()
     return result
 
 def main():

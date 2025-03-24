@@ -7,7 +7,7 @@ The conversation includes three distinct voices:
 
 SQL guidelines:
 DuckDB does not support transactions or relational integrity constraints. 
-DuckDB prefers bulk inserts where possible.
+Use bulk inserts where possible, i.e. multiple rows in the values clause.
 
 The conversation is hosted in a web browser using a Python Streamlit.
 Results of the DuckDB queries will be rendered in a streamlit dataframe.
