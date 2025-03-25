@@ -87,9 +87,20 @@ def render_chart(df: pd.DataFrame, content: str) -> Tuple[go.Figure, Optional[st
         # Apply common layout updates
         update_layout(fig, config)
         
+        # Test if the figure can be converted to JSON (which is what Plotly does when rendering)
+        # This will catch any Plotly-specific validation errors
+        try:
+            fig.to_json()
+        except Exception as plotly_error:
+            return None, f"Error rendering chart: {str(plotly_error)}"
+            
         return fig, None
+    except ValueError as ve:
+        return None, str(ve)
+    except KeyError as ke:
+        return None, f"Missing key in configuration: {str(ke)}"
     except Exception as e:
-        return None, str(e)
+        return None, f"Error rendering chart: {str(e)}"
 
 
 def parse_chart_config(content: str) -> Dict[str, Any]:
@@ -103,6 +114,9 @@ def parse_chart_config(content: str) -> Dict[str, Any]:
         A dictionary containing the chart configuration
     """
     config = {}
+    
+    # Print the raw content for debugging
+    print(f"DEBUG - Raw chart config content:\n{content}")
     
     # Split the content into lines and process each line
     lines = content.strip().split('\n')
@@ -120,6 +134,8 @@ def parse_chart_config(content: str) -> Dict[str, Any]:
         
         config[key] = value
     
+    # Print the parsed config for debugging
+    print(f"DEBUG - Parsed chart config: {config}")
     return config
 
 
@@ -176,7 +192,7 @@ def create_bar_chart(df: pd.DataFrame, config: Dict[str, Any]) -> go.Figure:
         x=df[x],
         y=df[y],
         text=df[config['text']] if 'text' in config and config['text'] in df.columns else None,
-        marker_color=marker_color,
+        marker=dict(color=marker_color),
         hovertext=get_hover_text(df, config),
         hoverinfo='text' if 'hovertext' in config else None
     ))
@@ -199,7 +215,7 @@ def create_box_chart(df: pd.DataFrame, config: Dict[str, Any]) -> go.Figure:
     fig = go.Figure(go.Box(
         x=df[x] if x and x in df.columns else None,
         y=df[y],
-        marker_color=marker_color,
+        marker=dict(color=marker_color),
         hovertext=get_hover_text(df, config),
         hoverinfo='text' if 'hovertext' in config else None
     ))
@@ -277,7 +293,7 @@ def create_histogram_chart(df: pd.DataFrame, config: Dict[str, Any]) -> go.Figur
     # Create the figure
     fig = go.Figure(go.Histogram(
         x=df[x],
-        marker_color=marker_color,
+        marker=dict(color=marker_color),
         hovertext=get_hover_text(df, config),
         hoverinfo='text' if 'hovertext' in config else None
     ))
@@ -481,7 +497,7 @@ def create_choropleth_mapbox(df: pd.DataFrame, config: Dict[str, Any]) -> go.Fig
     return fig
 
 
-def get_marker_color(df: pd.DataFrame, config: Dict[str, Any]) -> Union[List, str, None]:
+def get_marker_color(df: pd.DataFrame, config: Dict[str, Any]) -> Union[str, None]:
     """
     Gets the marker color from the configuration.
     
@@ -490,15 +506,34 @@ def get_marker_color(df: pd.DataFrame, config: Dict[str, Any]) -> Union[List, st
         config: The chart configuration dictionary
         
     Returns:
-        Either a column from the dataframe, a constant color string, or None
+        Either a valid color string or None
     """
     if 'marker_color' not in config:
         return None
     
     marker_color = config['marker_color']
-    if marker_color in df.columns:
-        return df[marker_color]
-    return marker_color
+    print(f"DEBUG - marker_color value: '{marker_color}' of type {type(marker_color)}")
+    
+    # For now, we only support constant color values
+    # We specifically ignore any value that matches a column name
+    # This is a temporary simplification until proper column mapping is implemented
+    
+    # Common color names that are safe to use
+    valid_colors = [
+        'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink',
+        'brown', 'black', 'white', 'gray', 'cyan', 'magenta'
+    ]
+    
+    # If it's a common color name, return it
+    if isinstance(marker_color, str) and marker_color.lower() in valid_colors:
+        return marker_color
+    
+    # If it's a hex color code, return it
+    if isinstance(marker_color, str) and marker_color.startswith('#'):
+        return marker_color
+        
+    # Otherwise, return a default color
+    return 'blue'
 
 
 def get_marker_size(df: pd.DataFrame, config: Dict[str, Any]) -> Union[List, int, None]:

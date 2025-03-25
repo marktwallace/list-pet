@@ -130,23 +130,34 @@ def display_figure_item(item, idx, sess, db):
     # Get the semantic identifier and prepare keys
     semantic_id = attributes.get("dataframe")
     dataframe_key = "dataframe_" + semantic_id
-    figure_key = f"figure_{idx}_{semantic_id}"
+    
+    content_hash = hash(content) % 100000  # Keep it to 5 digits
+    figure_key = f"figure_{idx}_{semantic_id}_{content_hash}"
     
     # Get display name
     display_name = semantic_id.split("_")[0] if "_" in semantic_id else semantic_id
     title = attributes.get("title", f"Chart for {display_name}")
     
     with st.expander(title_text(title), expanded=True):
-        # If dataframe exists, render chart
+        # If dataframe exists, render chart or retrieve from cache
         if dataframe_key in sess:
-            df = sess[dataframe_key]
-            fig, err = render_chart(df, content)
-            
-            if err:
-                st.error(f"Error rendering chart: {err}")
-                st.dataframe(df, use_container_width=True, hide_index=True)
+            # Check if figure is already cached in session state
+            if figure_key in sess:
+                print(f"DEBUG - Using cached figure with key: {figure_key}")
+                fig = sess[figure_key]
+                st.plotly_chart(fig, use_container_width=True, key=figure_key)
             else:
-                st.plotly_chart(fig, use_container_width=True)
+                df = sess[dataframe_key]
+                fig, err = render_chart(df, content)
+                
+                if err:
+                    st.error(f"Error rendering chart: {err}")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    # Cache the figure in session state
+                    sess[figure_key] = fig
+                    print(f"DEBUG - Caching new figure with key: {figure_key}")
+                    st.plotly_chart(fig, use_container_width=True, key=figure_key)
             return
         
         # Dataframe doesn't exist, show regeneration button
@@ -168,7 +179,10 @@ def display_figure_item(item, idx, sess, db):
             if arr and tag_idx < len(arr):
                 sql = arr[tag_idx]["content"]
                 button_key = f"fig_btn_{idx}_{msg_idx}_{tag_idx}"
-                handle_regenerate_button(button_key, sql, db, dataframe_key)
+                if handle_regenerate_button(button_key, sql, db, dataframe_key):
+                    # Clear the cached figure when regenerating the dataframe
+                    if figure_key in sess:
+                        del sess[figure_key]
             else:
                 st.error("Missing SQL for figure dataframe regeneration")
         except (ValueError, IndexError) as e:
