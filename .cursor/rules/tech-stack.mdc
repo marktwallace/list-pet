@@ -8,6 +8,7 @@ alwaysApply: false
 
 - Do not extend the tech stack without asking
 - Python 3.10
-- streamlit and technologies that are well integrated with streamlit, like plotley
+- streamlit
+- Plotly Graph Objects (exclusively, no backward compatiblity)
 - langchain
 - DuckDB
