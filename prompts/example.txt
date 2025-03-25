@@ -198,7 +198,7 @@ Assistant:
   </sql>
   <chart dataframe="imported_songs">
     type: pie
-    names: Genre
+    labels: Genre
     values: song_count
     title: Distribution of Songs by Genre
     hole: 0.3
@@ -236,15 +236,15 @@ Assistant:
     type: scatter_mapbox
     lat: latitude
     lon: longitude
-    hover_data: [city,population,country]
-    color: population
-    size: population
+    text: city
+    hovertext: [city, population, country]
+    marker_size: population
+    marker_color: population
     title: Cities by Population
     mapbox_style: open-street-map
     zoom: 3
-    marker_color: red
-    text: city
   </chart>
+
   I've imported your cities data and created a map showing the locations. Each point represents a city, with the size and color indicating the population. You can hover over each point to see more details.
 
 

@@ -4,6 +4,7 @@ import re
 
 import duckdb
 import streamlit as st
+import pandas as pd
 
 from langchain_core.prompts import (
     SystemMessagePromptTemplate,
@@ -17,6 +18,7 @@ from langchain_core.output_parsers import StrOutputParser
 from .prompt_loader import get_prompts
 from .database import Database
 from .parsing import get_elements, SQL_REGEX
+from .chart_renderer import render_chart
 
 logfile = None
 
@@ -108,11 +110,19 @@ def main():
                     if not attributes.get("name"):
                         st.error("Dataframe must have a name")
                         continue
-                    with st.expander(title_text(attributes.get("name")), expanded=True):
-                        key = "dataframe_" + attributes.get("name")
+                    
+                    # Get the semantic identifier from the name attribute
+                    semantic_id = attributes.get("name")
+                    
+                    # Use table name for display if available, otherwise use semantic ID
+                    display_name = attributes.get("table", semantic_id)
+                    if attributes.get("display_name"):
+                        display_name = attributes.get("display_name")
+                    
+                    with st.expander(title_text(display_name), expanded=True):
+                        key = "dataframe_" + semantic_id
                         if key in sess:
                             df = sess[key]
-                            print(f"DEBUG - Found dataframe in session state, displaying with shape: {df.shape}")  
                             st.dataframe(df, use_container_width=True, hide_index=True)
                         else:
                             print(f"DEBUG - Dataframe not found in session state with key: {key}")
@@ -156,20 +166,37 @@ def main():
                         st.error("Figure must have a dataframe")
                         continue
                     
-                    dataframe_key = "dataframe_" + attributes.get("dataframe")
-                    figure_key = f"figure_{idx}_{attributes.get('dataframe')}"
+                    # Get the semantic identifier from the dataframe attribute
+                    semantic_id = attributes.get("dataframe")
+                    dataframe_key = "dataframe_" + semantic_id
+                    figure_key = f"figure_{idx}_{semantic_id}"
                     
-                    with st.expander(title_text(attributes.get("title", "Chart")), expanded=True):
+                    # Extract table name from semantic ID for display purposes
+                    if "_" in semantic_id:
+                        display_name = semantic_id.split("_")[0]
+                    else:
+                        display_name = semantic_id
+                    
+                    title = attributes.get("title", f"Chart for {display_name}")
+                    
+                    with st.expander(title_text(title), expanded=True):
                         # Check if the referenced dataframe exists in session state
                         if dataframe_key in sess:
                             df = sess[dataframe_key]
-                            # Here you would render the figure using the dataframe
-                            # For now, we'll just display the dataframe
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-                            st.text("Figure would render here using the dataframe")
+                            
+                            # Render the chart using our new chart_renderer
+                            fig, err = render_chart(df, content)
+                            
+                            if err:
+                                st.error(f"Error rendering chart: {err}")
+                                # Fall back to displaying the dataframe
+                                st.dataframe(df, use_container_width=True, hide_index=True)
+                            else:
+                                # Display the plotly figure
+                                st.plotly_chart(fig, use_container_width=True)
                         else:
                             # Dataframe doesn't exist, we need a regeneration button
-                            st.info(f"The dataframe '{attributes.get('dataframe')}' is not available. Click the button below to regenerate it.")
+                            st.info(f"The dataframe '{semantic_id}' is not available. Click the button below to regenerate it.")
                             
                             msg_idx = attributes.get("msg_idx")
                             tag_idx = attributes.get("tag_idx")
@@ -197,9 +224,8 @@ def main():
                                                 st.error(f"Error: {err}")
                                                 print(f"ERROR - {err} for figure dataframe regeneration while rerunning SQL: {sql}")
                                             else:
-                                                # Store the dataframe in session state
-                                                dataframe_name = attributes.get("dataframe")
-                                                sess["dataframe_" + dataframe_name] = df
+                                                # Store the dataframe in session state with semantic ID
+                                                sess[dataframe_key] = df
                                                 st.rerun()
                                     else:
                                         st.error("Missing SQL for figure dataframe regeneration")
@@ -220,6 +246,7 @@ def main():
         tag_idx = sql_tuple[0]
         msg_idx = len(sess.db_messages) - 1
         sql = sql_tuple[1]["content"]
+
         df,err = db.execute_query(sql)
         if df is not None:
             print(f"DEBUG - Query returned dataframe with {len(df)} rows and {len(df.columns)} columns")
@@ -287,31 +314,41 @@ def main():
         chart_content = chart_tuple[1]["content"]
         chart_attrs = chart_tuple[1]["attributes"]
         
-        # Get the referenced dataframe name
-        dataframe_name = chart_attrs.get("dataframe")
-        if not dataframe_name:
+        # Get the referenced dataframe name from chart attributes
+        df_reference = chart_attrs.get("dataframe")
+        if not df_reference:
             print("ERROR - Chart missing dataframe reference")
             st.error("Chart missing dataframe reference")
             st.rerun()
         
-        # Look up the provenance information for this dataframe
-        provenance_key = f"provenance_{dataframe_name}"
+        # Resolve the dataframe reference to a specific semantic ID
+        semantic_id = None
+        
+        # If a table name is specified, use the latest for that table
+        if df_reference in sess.latest_dataframes:
+            semantic_id = sess.latest_dataframes[df_reference]
+            print(f"DEBUG - Resolved table name '{df_reference}' to semantic ID: {semantic_id}")
+        else:
+            # If not a known table name, use as-is (might be a direct semantic ID reference)
+            semantic_id = df_reference
+            print(f"DEBUG - Using reference directly: {semantic_id}")
+        
+        # Get the provenance information for this dataframe
+        provenance_key = f"provenance_{semantic_id}"
         if provenance_key in sess:
             provenance = sess[provenance_key]
             msg_idx = provenance.get("msg_idx")
             tag_idx = provenance.get("tag_idx")
             
-            # Now create a figure tag with complete provenance information
-            figure_content = f'<figure dataframe="{dataframe_name}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" title="{chart_attrs.get("title", "Chart")}">\n{chart_content}\n</figure>'
-            print(f"DEBUG - Creating figure with provenance: {figure_content}")
+            # Create the figure tag with the resolved semantic ID and provenance information
+            figure_content = f'<figure dataframe="{semantic_id}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" title="{chart_attrs.get("title", "Chart")}">\n{chart_content}\n</figure>'
+            print(f"DEBUG - Creating figure with resolved dataframe: {semantic_id}")
             
             # Add the figure message
             add_message(role=ASSISTANT_ROLE, content=figure_content, db=db)
         else:
-            print(f"ERROR - No provenance information found for dataframe: {dataframe_name}")
-            st.error(f"No provenance information found for dataframe: {dataframe_name}")
-
-        # sess[chart_key] = chart_content
+            print(f"ERROR - No provenance information found for dataframe: {semantic_id}")
+            st.error(f"Could not find dataframe: {semantic_id}")
         
         st.rerun()
 
