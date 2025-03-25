@@ -177,32 +177,25 @@ def display_figure_item(item, idx, sess, db):
 def process_sql_query(sql_tuple, db):
     """Process an SQL query and store results as a dataframe"""
     sess = st.session_state
-    tag_idx = sql_tuple[0]
+    tag_idx, sql_item = sql_tuple
+    sql = sql_item["content"]
     msg_idx = len(sess.db_messages) - 1
-    sql = sql_tuple[1]["content"]
 
+    # Execute query and handle errors
     df, err = db.execute_query(sql)
-    if df is None:
-        if err:
-            content = f"<error>\n{err}\n</error>\n"
-            add_message(role=USER_ROLE, content=content, db=db)
+    if err:
+        add_message(role=USER_ROLE, content=f"<error>\n{err}\n</error>\n", db=db)
         return True
     
-    # Process successful query results
-    print(f"DEBUG - Query returned dataframe with {len(df)} rows and {len(df.columns)} columns")
-    tsv_output = ["\t".join(df.columns)]
-    for idx, (_, row) in enumerate(df.iterrows()):
-        if idx >= 5 and len(df) > 20:
-            tsv_output.append("...")
-            break
-        tsv_output.append("\t".join(str(val) for val in row))
+    if df is None:
+        return True
     
     # Extract table name from SQL
-    table_name = re.search(r"FROM\s+(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
-    table_name = table_name.group(1) if table_name else "unknown"
-    print(f"DEBUG - {'Detected' if table_name != 'unknown' else 'No'} table name for dataframe: {table_name}")
+    table_match = re.search(r"FROM\s+(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
+    table_name = table_match.group(1) if table_match else "unknown"
+    print(f"DEBUG - Using table name: {table_name} for dataframe")
     
-    # Create semantic identifier and manage counters
+    # Create semantic ID
     if table_name not in sess.table_counters:
         sess.table_counters[table_name] = 1
     else:
@@ -214,61 +207,62 @@ def process_sql_query(sql_tuple, db):
     # Store dataframe in session state
     dataframe_key = f"dataframe_{semantic_id}"
     sess[dataframe_key] = df
-    print(f"DEBUG - Storing dataframe with semantic ID: {semantic_id}, key: {dataframe_key}")
     
     # Store provenance information
     sess[f"provenance_{semantic_id}"] = {
-        "msg_idx": msg_idx,
-        "tag_idx": tag_idx,
-        "sql": sql,
-        "timestamp": datetime.now().isoformat()
+        "msg_idx": msg_idx, "tag_idx": tag_idx, 
+        "sql": sql, "timestamp": datetime.now().isoformat()
     }
     
-    # Create and add the dataframe message
-    content = f'<dataframe name="{semantic_id}" table="{table_name}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" >\n'
-    content += "\n".join(tsv_output) + "\n"
-    content += "</dataframe>\n"
-    print(f"DEBUG - Adding dataframe message with content length: {len(content)}")
-    add_message(role=USER_ROLE, content=content, db=db)
+    # Format preview for display
+    preview_rows = min(5, len(df)) if len(df) > 20 else len(df)
+    tsv_lines = ["\t".join(df.columns)]
+    tsv_lines.extend("\t".join(str(val) for val in row) for _, row in df.iloc[:preview_rows].iterrows())
+    if preview_rows < len(df):
+        tsv_lines.append("...")
     
+    # Create and add dataframe message
+    content = f'<dataframe name="{semantic_id}" table="{table_name}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" >\n'
+    content += "\n".join(tsv_lines) + "\n</dataframe>\n"
+    
+    print(f"DEBUG - Adding dataframe with semantic ID: {semantic_id}")
+    add_message(role=USER_ROLE, content=content, db=db)
     return True
 
 def process_chart_request(chart_tuple):
     """Process a chart request and create a figure element"""
     sess = st.session_state
-    chart_idx = chart_tuple[0]
-    chart_content = chart_tuple[1]["content"]
-    chart_attrs = chart_tuple[1]["attributes"]
+    chart_idx, chart_item = chart_tuple
+    chart_content = chart_item["content"]
+    chart_attrs = chart_item["attributes"]
     
-    # Get the referenced dataframe 
+    # Validate chart request
     df_reference = chart_attrs.get("dataframe")
     if not df_reference:
-        print("ERROR - Chart missing dataframe reference")
         st.error("Chart missing dataframe reference")
         return True
     
-    # Resolve dataframe reference
+    # Resolve dataframe reference (table name or direct semantic ID)
     semantic_id = sess.latest_dataframes.get(df_reference, df_reference)
-    print(f"DEBUG - Resolved reference '{df_reference}' to semantic ID: {semantic_id}")
-    
-    # Get provenance information
     provenance_key = f"provenance_{semantic_id}"
+    
+    # Validate dataframe exists
     if provenance_key not in sess:
-        print(f"ERROR - No provenance information found for dataframe: {semantic_id}")
         st.error(f"Could not find dataframe: {semantic_id}")
         return True
     
-    # Create figure with provenance
+    # Get provenance and create figure
     provenance = sess[provenance_key]
-    msg_idx = provenance.get("msg_idx")
-    tag_idx = provenance.get("tag_idx")
+    msg_idx, tag_idx = provenance.get("msg_idx"), provenance.get("tag_idx")
+    title = chart_attrs.get("title", f"Chart for {semantic_id.split('_')[0]}")
     
-    figure_content = f'<figure dataframe="{semantic_id}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" title="{chart_attrs.get("title", "Chart")}">\n{chart_content}\n</figure>'
-    print(f"DEBUG - Creating figure with resolved dataframe: {semantic_id}")
+    figure_content = (
+        f'<figure dataframe="{semantic_id}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" '
+        f'title="{title}">\n{chart_content}\n</figure>'
+    )
     
-    # Add the figure message
+    print(f"DEBUG - Creating figure for dataframe: {semantic_id}")
     add_message(role=ASSISTANT_ROLE, content=figure_content, db=Database())
-    
     return True
 
 def display_message(idx, message, sess, db):
