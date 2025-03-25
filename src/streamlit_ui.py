@@ -131,24 +131,33 @@ def display_figure_item(item, idx, sess, db):
     semantic_id = attributes.get("dataframe")
     dataframe_key = "dataframe_" + semantic_id
     
-    content_hash = hash(content) % 100000  # Keep it to 5 digits
+    # Get the chart configuration from session state
+    chart_config_key = f"chart_config_{semantic_id}"
+    chart_content = sess.get(chart_config_key, "")
+    
+    # Create a unique figure key using the chart content
+    content_hash = hash(chart_content) % 100000  # Keep it to 5 digits
     figure_key = f"figure_{idx}_{semantic_id}_{content_hash}"
     
-    # Get display name
-    display_name = semantic_id.split("_")[0] if "_" in semantic_id else semantic_id
-    title = attributes.get("title", f"Chart for {display_name}")
+    # Use the figure content as the title (it should contain only the title text)
+    title = content.strip()
+    
+    # Fallback if title is empty
+    if not title:
+        display_name = semantic_id.split("_")[0] if "_" in semantic_id else semantic_id
+        title = f"Chart for {display_name}"
     
     with st.expander(title_text(title), expanded=True):
         # If dataframe exists, render chart or retrieve from cache
         if dataframe_key in sess:
             # Check if figure is already cached in session state
             if figure_key in sess:
-                print(f"DEBUG - Using cached figure with key: {figure_key}")
                 fig = sess[figure_key]
                 st.plotly_chart(fig, use_container_width=True, key=figure_key)
             else:
                 df = sess[dataframe_key]
-                fig, err = render_chart(df, content)
+                # Use the stored chart configuration instead of the figure content
+                fig, err = render_chart(df, chart_content)
                 
                 if err:
                     st.error(f"Error rendering chart: {err}")
@@ -265,14 +274,28 @@ def process_chart_request(chart_tuple):
         st.error(f"Could not find dataframe: {semantic_id}")
         return True
     
-    # Get provenance and create figure
+    # Get provenance
     provenance = sess[provenance_key]
     msg_idx, tag_idx = provenance.get("msg_idx"), provenance.get("tag_idx")
-    title = chart_attrs.get("title", f"Chart for {semantic_id.split('_')[0]}")
     
+    # Extract title from chart content if available
+    title = None
+    title_match = re.search(r'title:\s*(.*?)$', chart_content, re.MULTILINE)
+    if title_match:
+        title = title_match.group(1).strip()
+    else:
+        # Fallback title
+        title = f"Chart for {semantic_id.split('_')[0]}"
+    
+    # Store chart content in session state for later use
+    chart_config_key = f"chart_config_{semantic_id}"
+    sess[chart_config_key] = chart_content
+    
+    # Create figure content with only the title in the content (not as an attribute)
     figure_content = (
-        f'<figure dataframe="{semantic_id}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" '
-        f'title="{title}">\n{chart_content}\n</figure>'
+        f'<figure dataframe="{semantic_id}" msg_idx="{msg_idx}" tag_idx="{tag_idx}">\n'
+        f'{title}\n'
+        f'</figure>'
     )
     
     print(f"DEBUG - Creating figure for dataframe: {semantic_id}")

@@ -115,9 +115,6 @@ def parse_chart_config(content: str) -> Dict[str, Any]:
     """
     config = {}
     
-    # Print the raw content for debugging
-    print(f"DEBUG - Raw chart config content:\n{content}")
-    
     # Split the content into lines and process each line
     lines = content.strip().split('\n')
     for line in lines:
@@ -133,9 +130,7 @@ def parse_chart_config(content: str) -> Dict[str, Any]:
             value = [item.strip() for item in value[1:-1].split(',')]
         
         config[key] = value
-    
-    # Print the parsed config for debugging
-    print(f"DEBUG - Parsed chart config: {config}")
+
     return config
 
 
@@ -512,12 +507,6 @@ def get_marker_color(df: pd.DataFrame, config: Dict[str, Any]) -> Union[str, Non
         return None
     
     marker_color = config['marker_color']
-    print(f"DEBUG - marker_color value: '{marker_color}' of type {type(marker_color)}")
-    
-    # For now, we only support constant color values
-    # We specifically ignore any value that matches a column name
-    # This is a temporary simplification until proper column mapping is implemented
-    
     # Common color names that are safe to use
     valid_colors = [
         'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink',
