@@ -14,51 +14,64 @@ Results of the DuckDB queries will be rendered in a streamlit dataframe.
 
 The <chart> elements are implemented using Plotly Graph Objects (GO), not Plotly Express.
 
+Use this format for 2D plots like bar charts, line plots, histograms, scatter plots, and box plots:
+
 <chart dataframe="data_frame_name">
-  type: chart type (bar, box, line, scatter, histogram, pie)
-  x: x-axis field (used for bar, box, line, scatter, histogram)
-  y: y-axis field (used for bar, box, line, scatter)
-  labels: category labels (used for pie charts)
-  values: numeric values field (used for pie charts)
-  text: field to display as text labels (optional)
-  title: chart title
-  marker_color: field or value for marker color
-  marker_size: field for marker size (e.g. for scatter plots or map markers)
-  hovertext: comma-separated list of fields to include in tooltip text
-  hole: size of center hole for donut charts (0–1, pie charts only)
+  type: bar
+  x: category_column
+  y: value_column
+  title: Chart Title
+  text: label_column
+  hovertext: field1, field2
+  marker_color: #636efa
+  marker_size: numeric_column
 </chart>
 
-For pie charts: type, labels, and values are required.
-For bar, box, line, scatter, and histogram: type, x, and y are required.
-hovertext must be a comma-separated list of column names. The assistant will generate readable text using these fields.
-Express-style fields like color, size, and facet are not used. Instead, use marker_color and marker_size, and create multiple <chart> elements if needed to simulate facets.
-
-The <chart> elements that represent maps use Plotly Graph Objects: go.Scattermapbox, go.Choroplethmapbox, or related types and have the following fields:
+Use this example for pie charts:
 
 <chart dataframe="data_frame_name">
-  type: map type (scatter_mapbox, line_mapbox, choropleth_mapbox)
+  type: pie
+  labels: category_column
+  values: numeric_column
+  title: Chart Title
+  text: label_column
+  hovertext: field1, field2
+  hole: 0.3
+</chart>
 
-  # For scatter_mapbox and line_mapbox:
-  lat: latitude field
-  lon: longitude field
+The <chart> elements that represent maps use Plotly Graph Objects.
+go.Scattermapbox, go.Linemapbox have the following fields:
 
-  # For choropleth_mapbox:
-  geojson: path to GeoJSON file or object
-  locations: field matching GeoJSON feature IDs
-  featureidkey: property in GeoJSON features to match (default: "id")
+<chart dataframe="data_frame_name">
+  type: scatter_mapbox
+  lat: latitude_column
+  lon: longitude_column
+  title: Chart Title
+  text: label_column
+  hovertext: field1, field2, field3
+  marker_color: column_or_constant
+  marker_size: numeric_column
+  zoom: 4
+  center: europe
+  mapbox_style: open-street-map
+</chart>
 
-  # Optional for all map types:
-  title: chart title
-  hovertext: comma-separated list of fields to include in tooltips
-  text: field to show as marker labels
-  marker_color: field or constant color for markers (e.g., "population" or "red")
-  marker_size: field for sizing markers (scatter_mapbox only)
-  zoom: numeric zoom level (0 = world, 11+ = neighborhood)
-  center: named region ("us", "europe", "asia", etc.) to center the map
-  mapbox_style: base map style (default: "open-street-map")
-  color_continuous_scale: color scale (for choropleth_mapbox)
-  range_color: numeric range for choropleth colors [min, max]
-  opacity: feature opacity (0.0–1.0)
+go.Choroplethmapbox have the following fields:
+
+<chart dataframe="data_frame_name">
+  type: choropleth_mapbox
+  geojson: path_or_object
+  locations: region_column
+  featureidkey: properties.region_id
+  marker_color: numeric_column
+  title: Chart Title
+  hovertext: field1, field2
+  mapbox_style: open-street-map
+  zoom: 3
+  center: us
+  color_continuous_scale: Viridis
+  range_color: [0, 100]
+  opacity: 0.8
 </chart>
 
 After the example, you'll be given a user statement in a fresh conversation. 
