@@ -98,11 +98,7 @@ def display_dataframe_item(item, idx, sess, db):
     """Display a dataframe element with its expander and regeneration button if needed"""
     content = item["content"]
     attributes = item["attributes"]
-    if not attributes.get("name"):
-        st.error("Dataframe must have a name")
-        return
-    
-    semantic_id = attributes.get("name")
+    semantic_id = attributes["name"]
     display_name = attributes.get("display_name", attributes.get("table", semantic_id))
     
     with st.expander(title_text(display_name), expanded=True):
@@ -136,12 +132,7 @@ def display_figure_item(item, idx, sess, db):
     """Display a figure element with its expander and regeneration button if needed"""
     content = item["content"]
     attributes = item["attributes"]
-    if not attributes.get("dataframe"):
-        st.error("Figure must have a dataframe")
-        return
-    
-    # Get the semantic identifier and prepare keys
-    semantic_id = attributes.get("dataframe")
+    semantic_id = attributes["dataframe"]
     dataframe_key = "dataframe_" + semantic_id
     
     # Validate both SQL and chart indices
