@@ -57,7 +57,9 @@ def render_chart(df: pd.DataFrame, content: str) -> Tuple[go.Figure, Optional[st
     """
     try:
         # Parse the chart configuration
+        print(f"DEBUG - Chart content: {content}")
         config = parse_chart_config(content)
+        print(f"DEBUG - Chart configuration: {config}")
         
         # Get the chart type
         chart_type = config.get('type', '').lower()

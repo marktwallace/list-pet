@@ -97,22 +97,23 @@ def display_dataframe_item(item, idx, sess, db):
         
         # Dataframe not found, try to regenerate
         print(f"DEBUG - Dataframe not found in session state with key: {key}")
-        msg_idx = attributes.get("msg_idx")
-        tag_idx = attributes.get("tag_idx")
+        sql_msg_idx = attributes.get("sql_msg_idx")
+        sql_tag_idx = attributes.get("sql_tag_idx")
         
-        if msg_idx is None or tag_idx is None:
-            st.error("Missing msg_idx or tag_idx for dataframe")
+        if sql_msg_idx is None or sql_tag_idx is None:
+            st.error("Missing sql_msg_idx or sql_tag_idx for dataframe")
             return
             
         try:
-            msg_idx, tag_idx = int(msg_idx), int(tag_idx)
-            msg_ref_content = sess.db_messages[msg_idx]["content"]
+            sql_msg_idx = int(sql_msg_idx)
+            sql_tag_idx = int(sql_tag_idx)
+            msg_ref_content = sess.db_messages[sql_msg_idx]["content"]
             msg_ref = get_elements(msg_ref_content)
             arr = msg_ref.get("sql", [])
             
-            if arr and tag_idx < len(arr):
-                sql = arr[tag_idx]["content"]
-                button_key = f"df_btn_{idx}_{msg_idx}_{tag_idx}"
+            if arr and sql_tag_idx < len(arr):
+                sql = arr[sql_tag_idx]["content"]
+                button_key = f"df_btn_{idx}_{sql_msg_idx}_{sql_tag_idx}"
                 handle_regenerate_button(button_key, sql, db, key)
             else:
                 st.error("Missing sql for dataframe regeneration")
@@ -131,9 +132,29 @@ def display_figure_item(item, idx, sess, db):
     semantic_id = attributes.get("dataframe")
     dataframe_key = "dataframe_" + semantic_id
     
-    # Get the chart configuration from session state
-    chart_config_key = f"chart_config_{semantic_id}"
-    chart_content = sess.get(chart_config_key, "")
+    # Get chart configuration from message history
+    chart_msg_idx = attributes.get("chart_msg_idx")
+    chart_tag_idx = attributes.get("chart_tag_idx")
+    
+    if chart_msg_idx is None or chart_tag_idx is None:
+        st.error("Missing chart_msg_idx or chart_tag_idx for figure")
+        return
+        
+    try:
+        chart_msg_idx = int(chart_msg_idx)
+        chart_tag_idx = int(chart_tag_idx)
+        chart_msg = sess.db_messages[chart_msg_idx]["content"]
+        msg_elements = get_elements(chart_msg)
+        chart_arr = msg_elements.get("chart", [])
+        
+        if not chart_arr or chart_tag_idx >= len(chart_arr):
+            st.error("Could not find chart configuration in message history")
+            return
+            
+        chart_content = chart_arr[chart_tag_idx]["content"]
+    except (ValueError, IndexError) as e:
+        st.error(f"Error retrieving chart configuration: {str(e)}")
+        return
     
     # Create a unique figure key using the chart content
     content_hash = hash(chart_content) % 100000  # Keep it to 5 digits
@@ -156,7 +177,7 @@ def display_figure_item(item, idx, sess, db):
                 st.plotly_chart(fig, use_container_width=True, key=figure_key)
             else:
                 df = sess[dataframe_key]
-                # Use the stored chart configuration instead of the figure content
+                # Use the chart configuration from message history
                 fig, err = render_chart(df, chart_content)
                 
                 if err:
@@ -172,22 +193,23 @@ def display_figure_item(item, idx, sess, db):
         # Dataframe doesn't exist, show regeneration button
         st.info(f"The dataframe '{semantic_id}' is not available. Click the button below to regenerate it.")
         
-        msg_idx = attributes.get("msg_idx")
-        tag_idx = attributes.get("tag_idx")
+        sql_msg_idx = attributes.get("sql_msg_idx")
+        sql_tag_idx = attributes.get("sql_tag_idx")
         
-        if msg_idx is None or tag_idx is None:
-            st.error("Missing msg_idx or tag_idx for figure dataframe")
+        if sql_msg_idx is None or sql_tag_idx is None:
+            st.error("Missing sql_msg_idx or sql_tag_idx for figure dataframe")
             return
             
         try:
-            msg_idx, tag_idx = int(msg_idx), int(tag_idx)
-            msg_ref_content = sess.db_messages[msg_idx]["content"]
+            sql_msg_idx = int(sql_msg_idx)
+            sql_tag_idx = int(sql_tag_idx)
+            msg_ref_content = sess.db_messages[sql_msg_idx]["content"]
             msg_ref = get_elements(msg_ref_content)
             arr = msg_ref.get("sql", [])
             
-            if arr and tag_idx < len(arr):
-                sql = arr[tag_idx]["content"]
-                button_key = f"fig_btn_{idx}_{msg_idx}_{tag_idx}"
+            if arr and sql_tag_idx < len(arr):
+                sql = arr[sql_tag_idx]["content"]
+                button_key = f"fig_btn_{idx}_{sql_msg_idx}_{sql_tag_idx}"
                 if handle_regenerate_button(button_key, sql, db, dataframe_key):
                     # Clear the cached figure when regenerating the dataframe
                     if figure_key in sess:
@@ -200,9 +222,11 @@ def display_figure_item(item, idx, sess, db):
 def process_sql_query(sql_tuple, db):
     """Process an SQL query and store results as a dataframe"""
     sess = st.session_state
-    tag_idx, sql_item = sql_tuple
+    sql_idx, sql_item = sql_tuple
     sql = sql_item["content"]
-    msg_idx = len(sess.db_messages) - 1
+    msg_idx = len(sess.db_messages) - 1 
+    # this is the index of the current message being processed, 
+    # which is an assistant or user message with a sql tag
 
     # Execute query and handle errors
     df, err = db.execute_query(sql)
@@ -231,12 +255,6 @@ def process_sql_query(sql_tuple, db):
     dataframe_key = f"dataframe_{semantic_id}"
     sess[dataframe_key] = df
     
-    # Store provenance information
-    sess[f"provenance_{semantic_id}"] = {
-        "msg_idx": msg_idx, "tag_idx": tag_idx, 
-        "sql": sql, "timestamp": datetime.now().isoformat()
-    }
-    
     # Format preview for display
     preview_rows = min(5, len(df)) if len(df) > 20 else len(df)
     tsv_lines = ["\t".join(df.columns)]
@@ -245,7 +263,7 @@ def process_sql_query(sql_tuple, db):
         tsv_lines.append("...")
     
     # Create and add dataframe message
-    content = f'<dataframe name="{semantic_id}" table="{table_name}" msg_idx="{msg_idx}" tag_idx="{tag_idx}" >\n'
+    content = f'<dataframe name="{semantic_id}" table="{table_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
     content += "\n".join(tsv_lines) + "\n</dataframe>\n"
     
     print(f"DEBUG - Adding dataframe with semantic ID: {semantic_id}")
@@ -267,16 +285,41 @@ def process_chart_request(chart_tuple):
     
     # Resolve dataframe reference (table name or direct semantic ID)
     semantic_id = sess.latest_dataframes.get(df_reference, df_reference)
-    provenance_key = f"provenance_{semantic_id}"
     
-    # Validate dataframe exists
-    if provenance_key not in sess:
-        st.error(f"Could not find dataframe: {semantic_id}")
+    # Find the dataframe and its SQL indices
+    def find_dataframe_sql_indices():
+        for i, msg in enumerate(reversed(sess.db_messages)):
+            msg_elements = get_elements(msg["content"])
+            if "dataframe" in msg_elements:
+                for df_item in msg_elements["dataframe"]:
+                    if df_item["attributes"].get("name") == semantic_id:
+                        msg_idx_str = df_item["attributes"].get("sql_msg_idx")
+                        tag_idx_str = df_item["attributes"].get("sql_tag_idx")
+                        if msg_idx_str is not None and tag_idx_str is not None:
+                            return int(msg_idx_str), int(tag_idx_str)
+        return None, None
+    
+    sql_msg_idx, sql_tag_idx = find_dataframe_sql_indices()
+    if sql_msg_idx is None or sql_tag_idx is None:
+        st.error(f"Could not find dataframe '{semantic_id}' in message history")
         return True
     
-    # Get provenance
-    provenance = sess[provenance_key]
-    msg_idx, tag_idx = provenance.get("msg_idx"), provenance.get("tag_idx")
+    # Find the most recent assistant message containing a chart tag
+    def find_chart_message():
+        for i, msg in enumerate(reversed(sess.db_messages)):
+            if msg["role"] == ASSISTANT_ROLE:
+                msg_elements = get_elements(msg["content"])
+                if "chart" in msg_elements:
+                    return len(sess.db_messages) - 1 - i
+        return None
+    
+    chart_msg_idx = find_chart_message()
+    if chart_msg_idx is None:
+        st.error("Could not find assistant message with chart configuration")
+        return True
+        
+    print(f"DEBUG - Chart configuration in message {chart_msg_idx} (role={sess.db_messages[chart_msg_idx]['role']})")
+    print(f"DEBUG - SQL in message {sql_msg_idx} (role={sess.db_messages[sql_msg_idx]['role']})")
     
     # Extract title from chart content if available
     title = None
@@ -287,13 +330,10 @@ def process_chart_request(chart_tuple):
         # Fallback title
         title = f"Chart for {semantic_id.split('_')[0]}"
     
-    # Store chart content in session state for later use
-    chart_config_key = f"chart_config_{semantic_id}"
-    sess[chart_config_key] = chart_content
-    
-    # Create figure content with only the title in the content (not as an attribute)
+    # Create figure content with title in content and all indices in attributes
     figure_content = (
-        f'<figure dataframe="{semantic_id}" msg_idx="{msg_idx}" tag_idx="{tag_idx}">\n'
+        f'<figure dataframe="{semantic_id}" sql_msg_idx="{sql_msg_idx}" sql_tag_idx="{sql_tag_idx}" '
+        f'chart_msg_idx="{chart_msg_idx}" chart_tag_idx="{chart_idx}">\n'
         f'{title}\n'
         f'</figure>'
     )
