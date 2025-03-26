@@ -527,7 +527,7 @@ def get_marker_color(df: pd.DataFrame, config: Dict[str, Any]) -> Union[str, Non
     return 'blue'
 
 
-def get_marker_size(df: pd.DataFrame, config: Dict[str, Any]) -> Union[List, int, None]:
+def get_marker_size(df: pd.DataFrame, config: Dict[str, Any]) -> Union[List, float, None]:
     """
     Gets the marker size from the configuration.
     
@@ -536,19 +536,24 @@ def get_marker_size(df: pd.DataFrame, config: Dict[str, Any]) -> Union[List, int
         config: The chart configuration dictionary
         
     Returns:
-        Either a column from the dataframe, a constant size, or None
+        Either a column of numeric values, a constant size, or None
+        
+    Raises:
+        ValueError: If marker_size is invalid or references a non-numeric column
     """
     if 'marker_size' not in config:
         return None
     
     marker_size = config['marker_size']
     if marker_size in df.columns:
+        if not pd.api.types.is_numeric_dtype(df[marker_size]):
+            raise ValueError(f"Column '{marker_size}' must contain numeric values for marker_size")
         return df[marker_size]
     
     try:
-        return int(marker_size)
+        return float(marker_size)  # Allow decimal values
     except (ValueError, TypeError):
-        return None
+        raise ValueError(f"marker_size must be either a numeric column name or a number, got: {marker_size}")
 
 
 def update_layout(fig: go.Figure, config: Dict[str, Any]) -> None:
