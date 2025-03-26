@@ -64,6 +64,24 @@ def init_session_state(sess, db):
 def title_text(input):
     return input[:90] + "..." if len(input) > 60 else input
 
+def validate_element_indices(attributes, required_attrs, element_type="element"):
+    """
+    Validates and converts message and tag indices from attributes.
+    Returns (msg_idx, tag_idx) tuple or (None, None) if validation fails.
+    """
+    for attr_msg, attr_tag, desc in required_attrs:
+        if attr_msg not in attributes or attr_tag not in attributes:
+            st.error(f"Missing {desc} message or tag index for {element_type}")
+            return None, None
+            
+        try:
+            msg_idx = int(attributes[attr_msg])
+            tag_idx = int(attributes[attr_tag])
+            return msg_idx, tag_idx
+        except (ValueError, IndexError) as e:
+            st.error(f"Error processing {desc} indices: {str(e)}")
+            return None, None
+
 def handle_regenerate_button(button_key, sql, db, dataframe_key):
     """Handle regeneration button for dataframes and figures"""
     if st.button("Regenerate", key=button_key, type="primary", use_container_width=True):
@@ -84,7 +102,6 @@ def display_dataframe_item(item, idx, sess, db):
         st.error("Dataframe must have a name")
         return
     
-    # Get the semantic identifier and display name
     semantic_id = attributes.get("name")
     display_name = attributes.get("display_name", attributes.get("table", semantic_id))
     
@@ -95,30 +112,25 @@ def display_dataframe_item(item, idx, sess, db):
             st.dataframe(df, use_container_width=True, hide_index=True)
             return
         
-        # Dataframe not found, try to regenerate
-        print(f"DEBUG - Dataframe not found in session state with key: {key}")
-        sql_msg_idx = attributes.get("sql_msg_idx")
-        sql_tag_idx = attributes.get("sql_tag_idx")
-        
-        if sql_msg_idx is None or sql_tag_idx is None:
-            st.error("Missing sql_msg_idx or sql_tag_idx for dataframe")
+        # Validate indices
+        sql_msg_idx, sql_tag_idx = validate_element_indices(
+            attributes,
+            [("sql_msg_idx", "sql_tag_idx", "SQL")],
+            "dataframe"
+        )
+        if sql_msg_idx is None:
             return
             
-        try:
-            sql_msg_idx = int(sql_msg_idx)
-            sql_tag_idx = int(sql_tag_idx)
-            msg_ref_content = sess.db_messages[sql_msg_idx]["content"]
-            msg_ref = get_elements(msg_ref_content)
-            arr = msg_ref.get("sql", [])
-            
-            if arr and sql_tag_idx < len(arr):
-                sql = arr[sql_tag_idx]["content"]
-                button_key = f"df_btn_{idx}_{sql_msg_idx}_{sql_tag_idx}"
-                handle_regenerate_button(button_key, sql, db, key)
-            else:
-                st.error("Missing sql for dataframe regeneration")
-        except (ValueError, IndexError) as e:
-            st.error(f"Error processing dataframe indices: {str(e)}")
+        msg_ref_content = sess.db_messages[sql_msg_idx]["content"]
+        msg_ref = get_elements(msg_ref_content)
+        arr = msg_ref.get("sql", [])
+        
+        if arr and sql_tag_idx < len(arr):
+            sql = arr[sql_tag_idx]["content"]
+            button_key = f"df_btn_{idx}_{sql_msg_idx}_{sql_tag_idx}"
+            handle_regenerate_button(button_key, sql, db, key)
+        else:
+            st.error("Missing sql for dataframe regeneration")
 
 def display_figure_item(item, idx, sess, db):
     """Display a figure element with its expander and regeneration button if needed"""
@@ -132,29 +144,38 @@ def display_figure_item(item, idx, sess, db):
     semantic_id = attributes.get("dataframe")
     dataframe_key = "dataframe_" + semantic_id
     
-    # Get chart configuration from message history
-    chart_msg_idx = attributes.get("chart_msg_idx")
-    chart_tag_idx = attributes.get("chart_tag_idx")
+    # Validate both SQL and chart indices
+    sql_msg_idx, sql_tag_idx = validate_element_indices(
+        attributes,
+        [("sql_msg_idx", "sql_tag_idx", "SQL")],
+        "figure"
+    )
+    if sql_msg_idx is None:
+        return
+        
+    chart_msg_idx, chart_tag_idx = validate_element_indices(
+        attributes,
+        [("chart_msg_idx", "chart_tag_idx", "chart")],
+        "figure"
+    )
+    if chart_msg_idx is None:
+        return
     
-    if chart_msg_idx is None or chart_tag_idx is None:
-        st.error("Missing chart_msg_idx or chart_tag_idx for figure")
+    # Get SQL array from message content
+    sql_msg_content = sess.db_messages[sql_msg_idx]["content"]
+    sql_elements = get_elements(sql_msg_content)
+    sql_arr = sql_elements.get("sql", [])
+    
+    # Create a unique figure key using the chart content
+    chart_msg = sess.db_messages[chart_msg_idx]["content"]
+    msg_elements = get_elements(chart_msg)
+    chart_arr = msg_elements.get("chart", [])
+    
+    if not chart_arr or chart_tag_idx >= len(chart_arr):
+        st.error("Could not find chart configuration in message history")
         return
         
-    try:
-        chart_msg_idx = int(chart_msg_idx)
-        chart_tag_idx = int(chart_tag_idx)
-        chart_msg = sess.db_messages[chart_msg_idx]["content"]
-        msg_elements = get_elements(chart_msg)
-        chart_arr = msg_elements.get("chart", [])
-        
-        if not chart_arr or chart_tag_idx >= len(chart_arr):
-            st.error("Could not find chart configuration in message history")
-            return
-            
-        chart_content = chart_arr[chart_tag_idx]["content"]
-    except (ValueError, IndexError) as e:
-        st.error(f"Error retrieving chart configuration: {str(e)}")
-        return
+    chart_content = chart_arr[chart_tag_idx]["content"]
     
     # Create a unique figure key using the chart content
     content_hash = hash(chart_content) % 100000  # Keep it to 5 digits
@@ -193,31 +214,15 @@ def display_figure_item(item, idx, sess, db):
         # Dataframe doesn't exist, show regeneration button
         st.info(f"The dataframe '{semantic_id}' is not available. Click the button below to regenerate it.")
         
-        sql_msg_idx = attributes.get("sql_msg_idx")
-        sql_tag_idx = attributes.get("sql_tag_idx")
-        
-        if sql_msg_idx is None or sql_tag_idx is None:
-            st.error("Missing sql_msg_idx or sql_tag_idx for figure dataframe")
-            return
-            
-        try:
-            sql_msg_idx = int(sql_msg_idx)
-            sql_tag_idx = int(sql_tag_idx)
-            msg_ref_content = sess.db_messages[sql_msg_idx]["content"]
-            msg_ref = get_elements(msg_ref_content)
-            arr = msg_ref.get("sql", [])
-            
-            if arr and sql_tag_idx < len(arr):
-                sql = arr[sql_tag_idx]["content"]
-                button_key = f"fig_btn_{idx}_{sql_msg_idx}_{sql_tag_idx}"
-                if handle_regenerate_button(button_key, sql, db, dataframe_key):
-                    # Clear the cached figure when regenerating the dataframe
-                    if figure_key in sess:
-                        del sess[figure_key]
-            else:
-                st.error("Missing SQL for figure dataframe regeneration")
-        except (ValueError, IndexError) as e:
-            st.error(f"Error processing figure indices: {str(e)}")
+        if sql_arr and sql_tag_idx < len(sql_arr):
+            sql = sql_arr[sql_tag_idx]["content"]
+            button_key = f"fig_btn_{idx}_{sql_msg_idx}_{sql_tag_idx}"
+            if handle_regenerate_button(button_key, sql, db, dataframe_key):
+                # Clear the cached figure when regenerating the dataframe
+                if figure_key in sess:
+                    del sess[figure_key]
+        else:
+            st.error("Missing SQL for figure dataframe regeneration")
 
 def process_sql_query(sql_tuple, db):
     """Process an SQL query and store results as a dataframe"""
