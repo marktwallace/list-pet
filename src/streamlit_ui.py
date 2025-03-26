@@ -98,11 +98,11 @@ def display_dataframe_item(item, idx, sess, db):
     """Display a dataframe element with its expander and regeneration button if needed"""
     content = item["content"]
     attributes = item["attributes"]
-    semantic_id = attributes["name"]
-    display_name = attributes.get("display_name", attributes.get("table", semantic_id))
+    dataframe_name = attributes["name"]
+    display_name = attributes.get("display_name", attributes.get("table", dataframe_name))
     
     with st.expander(title_text(display_name), expanded=True):
-        key = "dataframe_" + semantic_id
+        key = "dataframe_" + dataframe_name
         if key in sess:
             df = sess[key]
             st.dataframe(df, use_container_width=True, hide_index=True)
@@ -128,12 +128,17 @@ def display_dataframe_item(item, idx, sess, db):
         else:
             st.error("Missing sql for dataframe regeneration")
 
+def get_figure_key(idx, dataframe_name, chart_content):
+    """Generate a unique figure key based on index, dataframe name and chart content"""
+    content_hash = hash(chart_content) % 100000  # Keep it to 5 digits
+    return f"figure_{idx}_{dataframe_name}_{content_hash}"
+
 def display_figure_item(item, idx, sess, db):
     """Display a figure element with its expander and regeneration button if needed"""
     content = item["content"]
     attributes = item["attributes"]
-    semantic_id = attributes["dataframe"]
-    dataframe_key = "dataframe_" + semantic_id
+    dataframe_name = attributes["dataframe"]
+    dataframe_key = "dataframe_" + dataframe_name
     
     # Validate both SQL and chart indices
     sql_msg_idx, sql_tag_idx = validate_element_indices(
@@ -167,17 +172,14 @@ def display_figure_item(item, idx, sess, db):
         return
         
     chart_content = chart_arr[chart_tag_idx]["content"]
-    
-    # Create a unique figure key using the chart content
-    content_hash = hash(chart_content) % 100000  # Keep it to 5 digits
-    figure_key = f"figure_{idx}_{semantic_id}_{content_hash}"
+    figure_key = get_figure_key(idx, dataframe_name, chart_content)
     
     # Use the figure content as the title (it should contain only the title text)
     title = content.strip()
     
     # Fallback if title is empty
     if not title:
-        display_name = semantic_id.split("_")[0] if "_" in semantic_id else semantic_id
+        display_name = dataframe_name.split("_")[0] if "_" in dataframe_name else dataframe_name
         title = f"Chart for {display_name}"
     
     with st.expander(title_text(title), expanded=True):
@@ -185,25 +187,27 @@ def display_figure_item(item, idx, sess, db):
         if dataframe_key in sess:
             # Check if figure is already cached in session state
             if figure_key in sess:
-                fig = sess[figure_key]
-                st.plotly_chart(fig, use_container_width=True, key=figure_key)
+                cached = sess[figure_key]
+                if "error" in cached:
+                    st.error(f"Error rendering chart: {cached['error']}")
+                    st.dataframe(sess[dataframe_key], use_container_width=True, hide_index=True)
+                else:
+                    st.plotly_chart(cached["figure"], use_container_width=True, key=figure_key)
             else:
+                # If not cached, render it now (this should rarely happen after our changes)
                 df = sess[dataframe_key]
-                # Use the chart configuration from message history
                 fig, err = render_chart(df, chart_content)
-                
                 if err:
+                    sess[figure_key] = {"error": err}
                     st.error(f"Error rendering chart: {err}")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    # Cache the figure in session state
-                    sess[figure_key] = fig
-                    print(f"DEBUG - Caching new figure with key: {figure_key}")
+                    sess[figure_key] = {"figure": fig}
                     st.plotly_chart(fig, use_container_width=True, key=figure_key)
             return
         
         # Dataframe doesn't exist, show regeneration button
-        st.info(f"The dataframe '{semantic_id}' is not available. Click the button below to regenerate it.")
+        st.info(f"The dataframe '{dataframe_name}' is not available. Click the button below to regenerate it.")
         
         if sql_arr and sql_tag_idx < len(sql_arr):
             sql = sql_arr[sql_tag_idx]["content"]
@@ -244,11 +248,11 @@ def process_sql_query(sql_tuple, db):
     else:
         sess.table_counters[table_name] += 1
     
-    semantic_id = f"{table_name}_{sess.table_counters[table_name]}"
-    sess.latest_dataframes[table_name] = semantic_id
+    dataframe_name = f"{table_name}_{sess.table_counters[table_name]}"
+    sess.latest_dataframes[table_name] = dataframe_name
     
     # Store dataframe in session state
-    dataframe_key = f"dataframe_{semantic_id}"
+    dataframe_key = f"dataframe_{dataframe_name}"
     sess[dataframe_key] = df
     
     # Format preview for display
@@ -259,10 +263,10 @@ def process_sql_query(sql_tuple, db):
         tsv_lines.append("...")
     
     # Create and add dataframe message
-    content = f'<dataframe name="{semantic_id}" table="{table_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
+    content = f'<dataframe name="{dataframe_name}" table="{table_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
     content += "\n".join(tsv_lines) + "\n</dataframe>\n"
     
-    print(f"DEBUG - Adding dataframe with semantic ID: {semantic_id}")
+    print(f"DEBUG - Adding dataframe with name: {dataframe_name}")
     add_message(role=USER_ROLE, content=content, db=db)
     return True
 
@@ -276,11 +280,11 @@ def process_chart_request(chart_tuple):
     # Validate chart request
     df_reference = chart_attrs.get("dataframe")
     if not df_reference:
-        st.error("Chart missing dataframe reference")
+        add_message(role=USER_ROLE, content="<error>\nChart missing dataframe reference\n</error>\n", db=Database())
         return True
     
-    # Resolve dataframe reference (table name or direct semantic ID)
-    semantic_id = sess.latest_dataframes.get(df_reference, df_reference)
+    # Resolve dataframe reference (table name or direct dataframe name)
+    dataframe_name = sess.latest_dataframes.get(df_reference, df_reference)
     
     # Find the dataframe and its SQL indices
     def find_dataframe_sql_indices():
@@ -288,7 +292,7 @@ def process_chart_request(chart_tuple):
             msg_elements = get_elements(msg["content"])
             if "dataframe" in msg_elements:
                 for df_item in msg_elements["dataframe"]:
-                    if df_item["attributes"].get("name") == semantic_id:
+                    if df_item["attributes"].get("name") == dataframe_name:
                         msg_idx_str = df_item["attributes"].get("sql_msg_idx")
                         tag_idx_str = df_item["attributes"].get("sql_tag_idx")
                         if msg_idx_str is not None and tag_idx_str is not None:
@@ -297,7 +301,7 @@ def process_chart_request(chart_tuple):
     
     sql_msg_idx, sql_tag_idx = find_dataframe_sql_indices()
     if sql_msg_idx is None or sql_tag_idx is None:
-        st.error(f"Could not find dataframe '{semantic_id}' in message history")
+        add_message(role=USER_ROLE, content=f"<error>\nCould not find dataframe '{dataframe_name}' in message history\n</error>\n", db=Database())
         return True
     
     # Find the most recent assistant message containing a chart tag
@@ -311,11 +315,27 @@ def process_chart_request(chart_tuple):
     
     chart_msg_idx = find_chart_message()
     if chart_msg_idx is None:
-        st.error("Could not find assistant message with chart configuration")
+        add_message(role=USER_ROLE, content="<error>\nCould not find assistant message with chart configuration\n</error>\n", db=Database())
         return True
         
     print(f"DEBUG - Chart configuration in message {chart_msg_idx} (role={sess.db_messages[chart_msg_idx]['role']})")
     print(f"DEBUG - SQL in message {sql_msg_idx} (role={sess.db_messages[sql_msg_idx]['role']})")
+    
+    # Attempt to render the chart to validate configuration
+    dataframe_key = "dataframe_" + dataframe_name
+    if dataframe_key in sess:
+        df = sess[dataframe_key]
+        fig, err = render_chart(df, chart_content)
+        figure_key = get_figure_key(chart_idx, dataframe_name, chart_content)
+        
+        if err:
+            # Cache the error
+            sess[figure_key] = {"error": err}
+            add_message(role=USER_ROLE, content=f"<error>\nError rendering chart: {err}\n</error>\n", db=Database())
+            return True
+        else:
+            # Cache the successful figure
+            sess[figure_key] = {"figure": fig}
     
     # Extract title from chart content if available
     title = None
@@ -324,17 +344,17 @@ def process_chart_request(chart_tuple):
         title = title_match.group(1).strip()
     else:
         # Fallback title
-        title = f"Chart for {semantic_id.split('_')[0]}"
+        title = f"Chart for {dataframe_name.split('_')[0]}"
     
     # Create figure content with title in content and all indices in attributes
     figure_content = (
-        f'<figure dataframe="{semantic_id}" sql_msg_idx="{sql_msg_idx}" sql_tag_idx="{sql_tag_idx}" '
+        f'<figure dataframe="{dataframe_name}" sql_msg_idx="{sql_msg_idx}" sql_tag_idx="{sql_tag_idx}" '
         f'chart_msg_idx="{chart_msg_idx}" chart_tag_idx="{chart_idx}">\n'
         f'{title}\n'
         f'</figure>'
     )
     
-    print(f"DEBUG - Creating figure for dataframe: {semantic_id}")
+    print(f"DEBUG - Creating figure for dataframe: {dataframe_name}")
     add_message(role=ASSISTANT_ROLE, content=figure_content, db=Database())
     return True
 
