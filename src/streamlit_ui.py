@@ -36,7 +36,7 @@ avatars = {
 def add_message(role, content, db):
     message = {"role": role, "content": content}
     st.session_state.db_messages.append(message)
-    db.log_message(message)
+    db.log_message(message, st.session_state.current_conversation_id)
     global logfile
     logfile.write(f"{role}:\n{content}\n\n")
     logfile.flush()
@@ -49,12 +49,20 @@ def add_message(role, content, db):
         st.session_state.lc_messages.append(SystemMessagePromptTemplate.from_template(content))
             
 def init_session_state(sess, db):
+    """Initialize session state with a new conversation"""
     sess.prompts = get_prompts()
-    sess.lc_messages = []
-    sess.lc_messages.append(SystemMessagePromptTemplate.from_template(sess.prompts["system_prompt"]))
-    sess.db_messages = db.load_messages()
-    if len(sess.db_messages) == 0:
-        add_message(role=SYSTEM_ROLE, content=sess.prompts["welcome_message"], db=db)
+    sess.lc_messages = [SystemMessagePromptTemplate.from_template(sess.prompts["system_prompt"])]
+    
+    # Always create a new conversation for fresh session
+    conv_id = db.create_conversation("New Chat")
+    if conv_id is None:
+        st.error("Failed to create initial conversation")
+        return
+        
+    sess.current_conversation_id = conv_id
+    sess.db_messages = []
+    add_message(role=SYSTEM_ROLE, content=sess.prompts["welcome_message"], db=db)
+    
     sess.pending_chart = False
     sess.pending_sql = False
     sess.pending_response = False
@@ -399,15 +407,102 @@ def generate_llm_response():
     sess.pending_chart = list(enumerate(msg.get("chart", [])))       
     return True
 
+def render_conversation_sidebar(db):
+    """Render the conversation sidebar and handle conversation management"""
+    st.sidebar.title("Conversations")
+    
+    # New chat button
+    if st.sidebar.button("+ New Chat", type="primary", use_container_width=True):
+        # Create new conversation and reset state
+        conv_id = db.create_conversation("New Chat")
+        if conv_id is None:
+            st.sidebar.error("Failed to create new conversation")
+            return
+        
+        st.session_state.current_conversation_id = conv_id
+        st.session_state.db_messages = []
+        st.session_state.lc_messages = [SystemMessagePromptTemplate.from_template(st.session_state.prompts["system_prompt"])]
+        add_message(role=SYSTEM_ROLE, content=st.session_state.prompts["welcome_message"], db=db)
+        st.rerun()
+    
+    # Get all conversations
+    conversations = db.get_conversations()
+    if conversations.empty:
+        st.sidebar.info("No conversations found")
+        return
+    
+    # Display conversations
+    st.sidebar.divider()
+    for _, conv in conversations.iterrows():
+        col1, col2 = st.sidebar.columns([4, 1])
+        
+        # Determine if this is the active conversation
+        is_active = conv['id'] == st.session_state.current_conversation_id
+        
+        with col1:
+            # Show conversation title with visual indicator if active
+            title = "🟢 " + conv['title'] if is_active else conv['title']
+            if st.button(title, key=f"conv_{conv['id']}", use_container_width=True):
+                if not is_active:
+                    # Switch to this conversation
+                    st.session_state.current_conversation_id = conv['id']
+                    st.session_state.db_messages = db.load_messages(conv['id'])
+                    st.session_state.lc_messages = [SystemMessagePromptTemplate.from_template(st.session_state.prompts["system_prompt"])]
+                    for msg in st.session_state.db_messages:
+                        if msg["role"] == USER_ROLE:
+                            st.session_state.lc_messages.append(HumanMessagePromptTemplate.from_template(msg["content"]))
+                        elif msg["role"] == ASSISTANT_ROLE:
+                            st.session_state.lc_messages.append(AIMessagePromptTemplate.from_template(msg["content"]))
+                        elif msg["role"] == SYSTEM_ROLE:
+                            st.session_state.lc_messages.append(SystemMessagePromptTemplate.from_template(msg["content"]))
+                    st.rerun()
+        
+        with col2:
+            # Show options menu for the conversation
+            if st.button("⋮", key=f"opt_{conv['id']}", use_container_width=True):
+                st.session_state[f"show_options_{conv['id']}"] = True
+        
+        # Show options if menu was clicked
+        if st.session_state.get(f"show_options_{conv['id']}", False):
+            with st.sidebar.expander("Options", expanded=True):
+                # Title editing
+                new_title = st.text_input("Title", value=conv['title'], key=f"title_{conv['id']}")
+                if new_title != conv['title']:
+                    db.update_conversation(conv['id'], title=new_title)
+                    st.rerun()
+                
+                # Training data flags
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🏁 Flag" if not conv['is_flagged_for_training'] else "✅ Flagged", 
+                               key=f"flag_{conv['id']}", 
+                               type="primary" if not conv['is_flagged_for_training'] else "secondary"):
+                        db.update_conversation(conv['id'], is_flagged=not conv['is_flagged_for_training'])
+                        st.rerun()
+                
+                with col2:
+                    if st.button("🗑️ Archive" if not conv['is_archived'] else "📥 Restore",
+                               key=f"arch_{conv['id']}", 
+                               type="secondary"):
+                        db.update_conversation(conv['id'], is_archived=not conv['is_archived'])
+                        st.rerun()
+                
+                # Close options
+                if st.button("Close", key=f"close_{conv['id']}", use_container_width=True):
+                    st.session_state[f"show_options_{conv['id']}"] = False
+                    st.rerun()
 def main():
+    st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
+    
     global logfile
     if logfile is None:
         log_dir = f"logs/{datetime.now().strftime('%m-%d')}"
         os.makedirs(log_dir, exist_ok=True)
         logfile = open(f"{log_dir}/{datetime.now().strftime('%H-%M')}.log", "w")
     
+    # Initialize database and session state
     sess = st.session_state
-    if "conn" not in sess: # first time the app is run
+    if "conn" not in sess:  # app restart - create new session
         sess.conn = duckdb.connect('db/list_pet.db')
         db = Database()
         db.initialize_pet_meta_schema()
@@ -415,7 +510,10 @@ def main():
     else:
         db = Database()
     
-    st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
+    # Render UI
+    with st.sidebar:
+        render_conversation_sidebar(db)
+    
     st.title("🐾 List Pet")
     st.caption("Your friendly SQL assistant")
 
@@ -453,3 +551,4 @@ def main():
             sess.pending_sql = list(enumerate(msg.get("sql", [])))
             
         st.rerun()
+
