@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
 import re
+import traceback
 
 import duckdb
 import streamlit as st
@@ -411,8 +412,50 @@ def render_conversation_sidebar(db):
     """Render the conversation sidebar and handle conversation management"""
     st.sidebar.title("Conversations")
     
+    # Get all conversations first
+    conversations = db.get_conversations()
+    
+    # Process any pending renames from previous switch
+    pending_renames = [k for k in st.session_state.keys() if k.startswith("pending_rename_")]
+    if pending_renames:
+        print(f"DEBUG - Found pending renames: {pending_renames}")
+        pending_key = pending_renames[0]
+        conv_id = int(pending_key.split("_")[-1])
+        print(f"DEBUG - Processing rename for conversation {conv_id}")
+        
+        # Generate and apply the new name
+        messages = db.load_messages(conv_id)
+        print(f"DEBUG - Loaded {len(messages)} messages for rename")
+        new_title = generate_conversation_title(messages)
+        print(f"DEBUG - Generated new title: {new_title}")
+        
+        if new_title:
+            db.update_conversation(conv_id, title=new_title)
+            print(f"DEBUG - Updated conversation {conv_id} with new title: {new_title}")
+        else:
+            print(f"DEBUG - No new title generated for conversation {conv_id}")
+        
+        # Clear the pending state
+        del st.session_state[pending_key]
+        print(f"DEBUG - Cleared pending rename state: {pending_key}")
+        st.rerun()
+    
     # New chat button
     if st.sidebar.button("+ New Chat", type="primary", use_container_width=True):
+        # Check if current conversation needs renaming
+        current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)
+        if current_conv and current_conv['title'] == "New Chat":
+            # Process the rename immediately instead of queuing
+            print(f"DEBUG - Processing rename for conversation {current_conv['id']} before creating new chat")
+            messages = db.load_messages(current_conv['id'])
+            print(f"DEBUG - Loaded {len(messages)} messages for rename")
+            new_title = generate_conversation_title(messages)
+            print(f"DEBUG - Generated new title: {new_title}")
+            
+            if new_title:
+                db.update_conversation(current_conv['id'], title=new_title)
+                print(f"DEBUG - Updated conversation {current_conv['id']} with new title: {new_title}")
+        
         # Create new conversation and reset state
         conv_id = db.create_conversation("New Chat")
         if conv_id is None:
@@ -425,15 +468,14 @@ def render_conversation_sidebar(db):
         add_message(role=SYSTEM_ROLE, content=st.session_state.prompts["welcome_message"], db=db)
         st.rerun()
     
-    # Get all conversations
-    conversations = db.get_conversations()
-    if conversations.empty:
+    # Display conversations
+    if not conversations:
         st.sidebar.info("No conversations found")
         return
     
     # Display conversations
     st.sidebar.divider()
-    for _, conv in conversations.iterrows():
+    for conv in conversations:
         col1, col2 = st.sidebar.columns([4, 1])
         
         # Determine if this is the active conversation
@@ -444,9 +486,19 @@ def render_conversation_sidebar(db):
             title = "🟢 " + conv['title'] if is_active else conv['title']
             if st.button(title, key=f"conv_{conv['id']}", use_container_width=True):
                 if not is_active:
-                    # Switch to this conversation
+                    # Check if we're switching away from a "New Chat"
+                    current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)
+                    print(f"DEBUG - Current conversation before switch: {current_conv}")
+                    if current_conv and current_conv['title'] == "New Chat":
+                        # Queue the rename operation
+                        rename_key = f"pending_rename_{current_conv['id']}"
+                        st.session_state[rename_key] = True
+                        print(f"DEBUG - Queued rename operation: {rename_key}")
+                    
+                    # Switch to the selected conversation
                     st.session_state.current_conversation_id = conv['id']
                     st.session_state.db_messages = db.load_messages(conv['id'])
+                    print(f"DEBUG - Switched to conversation {conv['id']}")
                     st.session_state.lc_messages = [SystemMessagePromptTemplate.from_template(st.session_state.prompts["system_prompt"])]
                     for msg in st.session_state.db_messages:
                         if msg["role"] == USER_ROLE:
@@ -491,6 +543,86 @@ def render_conversation_sidebar(db):
                 if st.button("Close", key=f"close_{conv['id']}", use_container_width=True):
                     st.session_state[f"show_options_{conv['id']}"] = False
                     st.rerun()
+
+def extract_user_content(messages):
+    """Extract clean user message content from messages, excluding SQL/dataframe/figure elements"""
+    user_content = []
+    print(f"DEBUG - Processing {len(messages)} messages for content extraction")
+    for msg in messages:
+        if msg["role"] != USER_ROLE:
+            continue
+        
+        # Parse message elements
+        elements = get_elements(msg["content"])
+        
+        # Get markdown content if it exists
+        if "markdown" in elements:
+            user_content.append(elements["markdown"])
+            continue
+            
+        # Otherwise, use raw content if it doesn't contain any special tags
+        content = msg["content"].strip()
+        if not any(tag in content for tag in ["<sql>", "<dataframe>", "<figure>", "<error>"]):
+            user_content.append(content)
+            print(f"DEBUG - Extracted user content: {content[:50]}...")
+    
+    result = "\n---\n".join(user_content)
+    print(f"DEBUG - Final extracted content length: {len(result)} chars")
+    return result
+
+def generate_conversation_title(messages):
+    """Generate a title for a conversation based on its messages"""
+    if not messages:
+        print("DEBUG - No messages provided for title generation")
+        return None
+        
+    # Extract user messages
+    user_content = extract_user_content(messages)
+    if not user_content:
+        print("DEBUG - No user content extracted for title generation")
+        return None
+    
+    print(f"DEBUG - Generating title from {len(user_content)} chars of content")
+    
+    # Create prompt for title generation
+    prompt = f"""Based on this conversation:
+{user_content}
+
+Create a brief, descriptive title that captures its main topic or intent.
+Requirements:
+- Maximum 50 characters
+- No quotes or special characters
+- Should be a clear, concise phrase
+- Focus on the main topic or goal discussed
+- Do not include words like "Chat about" or "Discussion of"
+"""
+    
+    try:
+        # Use the same LLM as the main chat but with different parameters
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+        
+        # Create messages in the correct format
+        messages = [
+            SystemMessagePromptTemplate.from_template(
+                "You are a helpful assistant that creates concise, descriptive titles."
+            ).format(),
+            HumanMessagePromptTemplate.from_template(prompt).format()
+        ]
+        
+        # Use invoke instead of predict
+        title = llm.invoke(messages).content
+        print(f"DEBUG - Raw title generated: {title}")
+        
+        # Validate the title meets our requirements
+        if len(title) > 80:
+            title = title[:77] + "..."
+        
+        return title
+    except Exception as e:
+        print(f"ERROR - Failed to generate title: {str(e)}")
+        print(f"ERROR - Title generation traceback: {traceback.format_exc()}")
+        return None
+
 def main():
     st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
     

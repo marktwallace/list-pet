@@ -14,21 +14,21 @@ class Database:
         print("DEBUG - Initializing pet_meta schema")
         try:
             # Create schema if it doesn't exist
-            self.execute_query("CREATE SCHEMA IF NOT EXISTS pet_meta")
+            self.conn.execute("CREATE SCHEMA IF NOT EXISTS pet_meta")
             
             # Create sequences
-            self.execute_query("""
+            self.conn.execute("""
                 CREATE SEQUENCE IF NOT EXISTS pet_meta.conversation_seq
                 START 1 INCREMENT 1
             """)
             
-            self.execute_query("""
+            self.conn.execute("""
                 CREATE SEQUENCE IF NOT EXISTS pet_meta.message_log_seq
                 START 1 INCREMENT 1
             """)
             
             # Create conversations table
-            self.execute_query("""
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS pet_meta.conversations (
                     id INTEGER PRIMARY KEY,
                     title VARCHAR NOT NULL,
@@ -41,7 +41,7 @@ class Database:
             """)
             
             # Create message_log table with conversation_id foreign key
-            self.execute_query("""
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS pet_meta.message_log (
                     id INTEGER PRIMARY KEY,
                     conversation_id INTEGER NOT NULL,
@@ -53,7 +53,7 @@ class Database:
             """)
             
             # Create table_description table
-            self.execute_query("""
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS pet_meta.table_description (
                     id INTEGER PRIMARY KEY,
                     table_name VARCHAR NOT NULL,
@@ -65,7 +65,7 @@ class Database:
             """)
             
             # Create sequence for table_description
-            self.execute_query("""
+            self.conn.execute("""
                 CREATE SEQUENCE IF NOT EXISTS pet_meta.table_description_seq
                 START 1 INCREMENT 1
             """)
@@ -79,19 +79,14 @@ class Database:
     def create_conversation(self, title: str) -> int:
         """Create a new conversation and return its ID"""
         try:
-            result, err = self.execute_query("""
+            result = self.conn.execute("""
                 INSERT INTO pet_meta.conversations (id, title)
                 VALUES (nextval('pet_meta.conversation_seq'), ?)
                 RETURNING id
-            """, params=[title])
+            """, [title]).fetchone()
             
-            if err:
-                print(f"ERROR - Failed to create conversation: {err}")
-                return None
-                
-            if result is not None and not result.empty:
-                # Convert numpy.int32 to Python int
-                conversation_id = int(result.iloc[0]['id'])
+            if result:
+                conversation_id = result[0]  # Already a Python int
                 print(f"DEBUG - Created new conversation with ID: {conversation_id}")
                 return conversation_id
             else:
@@ -125,8 +120,7 @@ class Database:
                 return True  # Nothing to update
                 
             updates.append("last_updated = CURRENT_TIMESTAMP")
-            # Ensure conversation_id is a Python int
-            params.append(int(conversation_id))
+            params.append(conversation_id)
             
             query = f"""
                 UPDATE pet_meta.conversations 
@@ -134,7 +128,7 @@ class Database:
                 WHERE id = ?
             """
             
-            self.execute_query(query, params=params)
+            self.conn.execute(query, params)
             print(f"DEBUG - Updated conversation {conversation_id}")
             return True
         except Exception as e:
@@ -142,7 +136,7 @@ class Database:
             print(f"ERROR - Conversation update traceback: {traceback.format_exc()}")
             return False
 
-    def get_conversations(self, include_archived: bool = False) -> pd.DataFrame:
+    def get_conversations(self, include_archived: bool = False) -> list[dict]:
         """Get list of all conversations"""
         try:
             query = """
@@ -154,15 +148,23 @@ class Database:
                 query += " WHERE NOT is_archived"
             query += " ORDER BY last_updated DESC"
             
-            df, err = self.execute_query(query)
-            if err:
-                print(f"ERROR - Failed to get conversations: {err}")
-                return pd.DataFrame()
-            return df
+            results = self.conn.execute(query).fetchall()
+            conversations = []
+            for row in results:
+                conversations.append({
+                    'id': row[0],
+                    'title': row[1],
+                    'created_at': row[2],
+                    'last_updated': row[3],
+                    'is_flagged_for_training': row[4],
+                    'is_archived': row[5],
+                    'notes': row[6]
+                })
+            return conversations
         except Exception as e:
             print(f"ERROR - Failed to get conversations: {str(e)}")
             print(f"ERROR - Get conversations traceback: {traceback.format_exc()}")
-            return pd.DataFrame()
+            return []
 
     def log_message(self, message: dict, conversation_id: int) -> bool:
         """Store a message in the pet_meta.message_log table"""
@@ -170,21 +172,18 @@ class Database:
             role = message.get("role", "unknown")
             content = message.get("content", "")
             
-            # Ensure conversation_id is a Python int
-            conversation_id = int(conversation_id)
-            
             # Insert the message into the log
-            self.execute_query("""
+            self.conn.execute("""
                 INSERT INTO pet_meta.message_log (id, conversation_id, role, content)
                 VALUES (nextval('pet_meta.message_log_seq'), ?, ?, ?)
-            """, params=[conversation_id, role, content])
+            """, [conversation_id, role, content])
             
             # Update conversation last_updated timestamp
-            self.execute_query("""
+            self.conn.execute("""
                 UPDATE pet_meta.conversations
                 SET last_updated = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, params=[conversation_id])
+            """, [conversation_id])
             
             print(f"DEBUG - Message logged to conversation {conversation_id}")
             return True
@@ -194,30 +193,26 @@ class Database:
             print(f"ERROR - Message logging traceback: {traceback.format_exc()}")
             return False
     
-    def load_messages(self, conversation_id: int) -> list:
+    def load_messages(self, conversation_id: int) -> list[dict]:
         """Load messages for a specific conversation"""
         try:
-            # Ensure conversation_id is a Python int
-            conversation_id = int(conversation_id)
-            
-            df, err = self.execute_query("""
+            results = self.conn.execute("""
                 SELECT role, content
                 FROM pet_meta.message_log
                 WHERE conversation_id = ?
                 ORDER BY id ASC
-            """, params=[conversation_id])
+            """, [conversation_id]).fetchall()
             
-            if df is None or df.empty:
+            if not results:
                 print(f"DEBUG - No messages found for conversation {conversation_id}")
                 return []
             
             messages = []
-            for _, row in df.iterrows():
-                message = {
-                    "role": row['role'],
-                    "content": row['content']
-                }
-                messages.append(message)
+            for row in results:
+                messages.append({
+                    "role": row[0],
+                    "content": row[1]
+                })
             
             print(f"DEBUG - Loaded {len(messages)} messages from conversation {conversation_id}")
             return messages
@@ -298,7 +293,7 @@ class Database:
                 
                 # For all successful non-SELECT operations, return None for the error message
                 return None, None
-                    
+                
         except Exception as e:
             error_msg = f"SQL Error: {str(e)}"
             print(f"ERROR - {error_msg}")
