@@ -20,6 +20,7 @@ from .prompt_loader import get_prompts
 from .database import Database
 from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
+from .llm_handler import LLMHandler
 
 logfile = None
 
@@ -41,18 +42,12 @@ def add_message(role, content, db):
     global logfile
     logfile.write(f"{role}:\n{content}\n\n")
     logfile.flush()
-
-    if role == USER_ROLE:
-        st.session_state.lc_messages.append(HumanMessagePromptTemplate.from_template(content))
-    elif role == ASSISTANT_ROLE:
-        st.session_state.lc_messages.append(AIMessagePromptTemplate.from_template(content))
-    elif role == SYSTEM_ROLE:
-        st.session_state.lc_messages.append(SystemMessagePromptTemplate.from_template(content))
+    st.session_state.llm_handler.add_message(role, content)
             
 def init_session_state(sess, db):
     """Initialize session state with a new conversation"""
     sess.prompts = get_prompts()
-    sess.lc_messages = [SystemMessagePromptTemplate.from_template(sess.prompts["system_prompt"])]
+    sess.llm_handler = LLMHandler(sess.prompts)
     
     # Always create a new conversation for fresh session
     conv_id = db.create_conversation("New Chat")
@@ -397,10 +392,9 @@ def generate_llm_response():
     """Generate a response from the LLM and process it"""
     sess = st.session_state
     sess.pending_response = False
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
-    prompt_template = ChatPromptTemplate.from_messages(sess.lc_messages)
-    processing_pipeline = prompt_template | llm | StrOutputParser()
-    response = "".join(processing_pipeline.stream({}))
+    response = sess.llm_handler.generate_response()
+    if response is None:
+        return False
     add_message(role=ASSISTANT_ROLE, content=response, db=Database())
     msg = get_elements(response)
     sess.pending_sql = list(enumerate(msg.get("sql", [])))
@@ -464,7 +458,7 @@ def render_conversation_sidebar(db):
         
         st.session_state.current_conversation_id = conv_id
         st.session_state.db_messages = []
-        st.session_state.lc_messages = [SystemMessagePromptTemplate.from_template(st.session_state.prompts["system_prompt"])]
+        st.session_state.llm_handler = LLMHandler(st.session_state.prompts)
         add_message(role=SYSTEM_ROLE, content=st.session_state.prompts["welcome_message"], db=db)
         st.rerun()
     
@@ -499,14 +493,14 @@ def render_conversation_sidebar(db):
                     st.session_state.current_conversation_id = conv['id']
                     st.session_state.db_messages = db.load_messages(conv['id'])
                     print(f"DEBUG - Switched to conversation {conv['id']}")
-                    st.session_state.lc_messages = [SystemMessagePromptTemplate.from_template(st.session_state.prompts["system_prompt"])]
+                    st.session_state.llm_handler = LLMHandler(st.session_state.prompts)
                     for msg in st.session_state.db_messages:
                         if msg["role"] == USER_ROLE:
-                            st.session_state.lc_messages.append(HumanMessagePromptTemplate.from_template(msg["content"]))
+                            st.session_state.llm_handler.add_message(USER_ROLE, msg["content"])
                         elif msg["role"] == ASSISTANT_ROLE:
-                            st.session_state.lc_messages.append(AIMessagePromptTemplate.from_template(msg["content"]))
+                            st.session_state.llm_handler.add_message(ASSISTANT_ROLE, msg["content"])
                         elif msg["role"] == SYSTEM_ROLE:
-                            st.session_state.lc_messages.append(SystemMessagePromptTemplate.from_template(msg["content"]))
+                            st.session_state.llm_handler.add_message(SYSTEM_ROLE, msg["content"])
                     st.rerun()
         
         with col2:
@@ -582,46 +576,7 @@ def generate_conversation_title(messages):
         print("DEBUG - No user content extracted for title generation")
         return None
     
-    print(f"DEBUG - Generating title from {len(user_content)} chars of content")
-    
-    # Create prompt for title generation
-    prompt = f"""Based on this conversation:
-{user_content}
-
-Create a brief, descriptive title that captures its main topic or intent.
-Requirements:
-- Maximum 50 characters
-- No quotes or special characters
-- Should be a clear, concise phrase
-- Focus on the main topic or goal discussed
-- Do not include words like "Chat about" or "Discussion of"
-"""
-    
-    try:
-        # Use the same LLM as the main chat but with different parameters
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
-        
-        # Create messages in the correct format
-        messages = [
-            SystemMessagePromptTemplate.from_template(
-                "You are a helpful assistant that creates concise, descriptive titles."
-            ).format(),
-            HumanMessagePromptTemplate.from_template(prompt).format()
-        ]
-        
-        # Use invoke instead of predict
-        title = llm.invoke(messages).content
-        print(f"DEBUG - Raw title generated: {title}")
-        
-        # Validate the title meets our requirements
-        if len(title) > 80:
-            title = title[:77] + "..."
-        
-        return title
-    except Exception as e:
-        print(f"ERROR - Failed to generate title: {str(e)}")
-        print(f"ERROR - Title generation traceback: {traceback.format_exc()}")
-        return None
+    return st.session_state.llm_handler.generate_title(user_content)
 
 def main():
     st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
