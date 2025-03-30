@@ -23,7 +23,6 @@ from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
 from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
 
-logfile = None
 conv_manager = None
 
 avatars = {
@@ -358,7 +357,7 @@ def process_chart_request(chart_tuple):
     )
     
     print(f"DEBUG - Creating figure for dataframe: {dataframe_name}")
-    conv_manager.add_message(role=ASSISTANT_ROLE, content=figure_content)
+    conv_manager.add_message(role=USER_ROLE, content=figure_content)
     return True
 
 def generate_llm_response():
@@ -378,11 +377,7 @@ def generate_llm_response():
 def main():
     st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
     
-    global logfile, conv_manager
-    if logfile is None:
-        log_dir = f"logs/{datetime.now().strftime('%m-%d')}"
-        os.makedirs(log_dir, exist_ok=True)
-        logfile = open(f"{log_dir}/{datetime.now().strftime('%H-%M')}.log", "w")
+    global conv_manager
     
     # Initialize database and session state
     sess = st.session_state
