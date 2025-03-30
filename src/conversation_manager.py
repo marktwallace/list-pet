@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 import streamlit as st
 
 from .database import Database
@@ -14,7 +15,21 @@ SYSTEM_ROLE = "system"
 class ConversationManager:
     def __init__(self, db: Database):
         self.db = db
+        if 'logfile' not in st.session_state:
+            self._init_logging()
         
+    def _init_logging(self):
+        """Initialize logging for the conversation."""
+        log_dir = f"logs/{datetime.now().strftime('%m-%d')}"
+        os.makedirs(log_dir, exist_ok=True)
+        st.session_state.logfile = open(f"{log_dir}/{datetime.now().strftime('%H-%M')}.log", "w")
+        
+    def log(self, role: str, message: str):
+        """Write a message to the conversation log."""
+        if role in [USER_ROLE, ASSISTANT_ROLE] and 'logfile' in st.session_state:
+            st.session_state.logfile.write(f"\n{role.capitalize()}\n {message}\n")
+            st.session_state.logfile.flush()
+
     def title_text(self, input):
         """Helper function to truncate titles"""
         return input[:90] + "..." if len(input) > 60 else input
@@ -201,6 +216,7 @@ class ConversationManager:
         st.session_state.db_messages.append(message)
         self.db.log_message(message, st.session_state.current_conversation_id)
         st.session_state.llm_handler.add_message(role, content)
+        self.log(role, content)
 
     def init_session_state(self):
         """Initialize session state with a new conversation"""
