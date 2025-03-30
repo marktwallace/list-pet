@@ -21,13 +21,10 @@ from .database import Database
 from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
+from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
 
 logfile = None
-
-# Define roles
-USER_ROLE = "user"
-ASSISTANT_ROLE = "assistant"
-SYSTEM_ROLE = "system"
+conv_manager = None
 
 avatars = {
     USER_ROLE: "assets/avatars/data_scientist_128px.png",
@@ -35,37 +32,8 @@ avatars = {
     SYSTEM_ROLE: "assets/avatars/list_pet_128px.png"
 }
 
-def add_message(role, content, db):
-    message = {"role": role, "content": content}
-    st.session_state.db_messages.append(message)
-    db.log_message(message, st.session_state.current_conversation_id)
-    global logfile
-    logfile.write(f"{role}:\n{content}\n\n")
-    logfile.flush()
-    st.session_state.llm_handler.add_message(role, content)
-            
-def init_session_state(sess, db):
-    """Initialize session state with a new conversation"""
-    sess.prompts = get_prompts()
-    sess.llm_handler = LLMHandler(sess.prompts)
-    
-    # Always create a new conversation for fresh session
-    conv_id = db.create_conversation("New Chat")
-    if conv_id is None:
-        st.error("Failed to create initial conversation")
-        return
-        
-    sess.current_conversation_id = conv_id
-    sess.db_messages = []
-    add_message(role=SYSTEM_ROLE, content=sess.prompts["welcome_message"], db=db)
-    
-    sess.pending_chart = False
-    sess.pending_sql = False
-    sess.pending_response = False
-    sess.table_counters = {}
-    sess.latest_dataframes = {}
-
 def title_text(input):
+    """Helper function to truncate titles"""
     return input[:90] + "..." if len(input) > 60 else input
 
 def validate_element_indices(attributes, required_attrs, element_type="element"):
@@ -223,6 +191,32 @@ def display_figure_item(item, idx, sess, db):
         else:
             st.error("Missing SQL for figure dataframe regeneration")
 
+def display_message(idx, message, sess, db):
+    """Display a chat message with its components"""
+    with st.chat_message(message["role"], avatar=avatars.get(message["role"])):
+        msg = get_elements(message["content"])
+        
+        if "markdown" in msg:
+            st.markdown(msg["markdown"])
+        
+        if "sql" in msg:
+            for item in msg["sql"]:
+                with st.expander(title_text(item["content"]), expanded=False):
+                    st.code(item["content"])
+
+        if "dataframe" in msg:
+            for item in msg["dataframe"]:
+                display_dataframe_item(item, idx, sess, db)
+
+        if "figure" in msg:
+            for item in msg["figure"]:
+                display_figure_item(item, idx, sess, db)
+
+        if "error" in msg:
+            for item in msg["error"]:
+                with st.expander(title_text(item["content"]), expanded=False):
+                    st.code(item["content"])
+
 def process_sql_query(sql_tuple, db):
     """Process an SQL query and store results as a dataframe"""
     sess = st.session_state
@@ -238,7 +232,7 @@ def process_sql_query(sql_tuple, db):
     df, err = db.execute_query(sql)
     if err:
         print(f"DEBUG - SQL execution error: {err}")
-        add_message(role=USER_ROLE, content=f"<error>\n{err}\n</error>\n", db=db)
+        conv_manager.add_message(role=USER_ROLE, content=f"<error>\n{err}\n</error>\n")
         return True
     
     print(f"DEBUG - SQL execution completed, dataframe is {'None' if df is None else 'not None'}")
@@ -276,7 +270,7 @@ def process_sql_query(sql_tuple, db):
     content += "\n".join(tsv_lines) + "\n</dataframe>\n"
     
     print(f"DEBUG - Adding dataframe with name: {dataframe_name}")
-    add_message(role=USER_ROLE, content=content, db=db)
+    conv_manager.add_message(role=USER_ROLE, content=content)
     return True
 
 def process_chart_request(chart_tuple):
@@ -289,7 +283,7 @@ def process_chart_request(chart_tuple):
     # Validate chart request
     df_reference = chart_attrs.get("dataframe")
     if not df_reference:
-        add_message(role=USER_ROLE, content="<error>\nChart missing dataframe reference\n</error>\n", db=Database())
+        conv_manager.add_message(role=USER_ROLE, content="<error>\nChart missing dataframe reference\n</error>\n")
         return True
     
     # Resolve dataframe reference (table name or direct dataframe name)
@@ -310,7 +304,7 @@ def process_chart_request(chart_tuple):
     
     sql_msg_idx, sql_tag_idx = find_dataframe_sql_indices()
     if sql_msg_idx is None or sql_tag_idx is None:
-        add_message(role=USER_ROLE, content=f"<error>\nCould not find dataframe '{dataframe_name}' in message history\n</error>\n", db=Database())
+        conv_manager.add_message(role=USER_ROLE, content=f"<error>\nCould not find dataframe '{dataframe_name}' in message history\n</error>\n")
         return True
     
     # Find the most recent assistant message containing a chart tag
@@ -324,7 +318,7 @@ def process_chart_request(chart_tuple):
     
     chart_msg_idx = find_chart_message()
     if chart_msg_idx is None:
-        add_message(role=USER_ROLE, content="<error>\nCould not find assistant message with chart configuration\n</error>\n", db=Database())
+        conv_manager.add_message(role=USER_ROLE, content="<error>\nCould not find assistant message with chart configuration\n</error>\n")
         return True
         
     print(f"DEBUG - Chart configuration in message {chart_msg_idx} (role={sess.db_messages[chart_msg_idx]['role']})")
@@ -340,7 +334,7 @@ def process_chart_request(chart_tuple):
         if err:
             # Cache the error
             sess[figure_key] = {"error": err}
-            add_message(role=USER_ROLE, content=f"<error>\nError rendering chart: {err}\n</error>\n", db=Database())
+            conv_manager.add_message(role=USER_ROLE, content=f"<error>\nError rendering chart: {err}\n</error>\n")
             return True
         else:
             # Cache the successful figure
@@ -364,34 +358,8 @@ def process_chart_request(chart_tuple):
     )
     
     print(f"DEBUG - Creating figure for dataframe: {dataframe_name}")
-    add_message(role=ASSISTANT_ROLE, content=figure_content, db=Database())
+    conv_manager.add_message(role=ASSISTANT_ROLE, content=figure_content)
     return True
-
-def display_message(idx, message, sess, db):
-    """Display a chat message with its components"""
-    with st.chat_message(message["role"], avatar=avatars.get(message["role"])):
-        msg = get_elements(message["content"])
-        
-        if "markdown" in msg:
-            st.markdown(msg["markdown"])
-        
-        if "sql" in msg:
-            for item in msg["sql"]:
-                with st.expander(title_text(item["content"]), expanded=False):
-                    st.code(item["content"])
-
-        if "dataframe" in msg:
-            for item in msg["dataframe"]:
-                display_dataframe_item(item, idx, sess, db)
-
-        if "figure" in msg:
-            for item in msg["figure"]:
-                display_figure_item(item, idx, sess, db)
-
-        if "error" in msg:
-            for item in msg["error"]:
-                with st.expander(title_text(item["content"]), expanded=False):
-                    st.code(item["content"])
 
 def generate_llm_response():
     """Generate a response from the LLM and process it"""
@@ -400,193 +368,17 @@ def generate_llm_response():
     response = sess.llm_handler.generate_response()
     if response is None:
         return False
-    add_message(role=ASSISTANT_ROLE, content=response, db=Database())
+    conv_manager.add_message(role=ASSISTANT_ROLE, content=response)
     msg = get_elements(response)
     sess.pending_sql = list(enumerate(msg.get("sql", [])))
     print(f"DEBUG - pending_sql: {sess.pending_sql}")
     sess.pending_chart = list(enumerate(msg.get("chart", [])))       
     return True
 
-def render_conversation_sidebar(db):
-    """Render the conversation sidebar and handle conversation management"""
-    st.sidebar.title("Conversations")
-    
-    # Get all conversations first
-    conversations = db.get_conversations()
-    
-    # Process any pending renames from previous switch
-    pending_renames = [k for k in st.session_state.keys() if k.startswith("pending_rename_")]
-    if pending_renames:
-        print(f"DEBUG - Found pending renames: {pending_renames}")
-        pending_key = pending_renames[0]
-        conv_id = int(pending_key.split("_")[-1])
-        print(f"DEBUG - Processing rename for conversation {conv_id}")
-        
-        # Generate and apply the new name
-        messages = db.load_messages(conv_id)
-        print(f"DEBUG - Loaded {len(messages)} messages for rename")
-        new_title = generate_conversation_title(messages)
-        print(f"DEBUG - Generated new title: {new_title}")
-        
-        if new_title:
-            db.update_conversation(conv_id, title=new_title)
-            print(f"DEBUG - Updated conversation {conv_id} with new title: {new_title}")
-        else:
-            print(f"DEBUG - No new title generated for conversation {conv_id}")
-        
-        # Clear the pending state
-        del st.session_state[pending_key]
-        print(f"DEBUG - Cleared pending rename state: {pending_key}")
-        st.rerun()
-    
-    # New chat button
-    if st.sidebar.button("+ New Chat", type="primary", use_container_width=True):
-        # Check if current conversation needs renaming
-        current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)
-        if current_conv and current_conv['title'] == "New Chat":
-            # Process the rename immediately instead of queuing
-            print(f"DEBUG - Processing rename for conversation {current_conv['id']} before creating new chat")
-            messages = db.load_messages(current_conv['id'])
-            print(f"DEBUG - Loaded {len(messages)} messages for rename")
-            new_title = generate_conversation_title(messages)
-            print(f"DEBUG - Generated new title: {new_title}")
-            
-            if new_title:
-                db.update_conversation(current_conv['id'], title=new_title)
-                print(f"DEBUG - Updated conversation {current_conv['id']} with new title: {new_title}")
-        
-        # Create new conversation and reset state
-        conv_id = db.create_conversation("New Chat")
-        if conv_id is None:
-            st.sidebar.error("Failed to create new conversation")
-            return
-        
-        st.session_state.current_conversation_id = conv_id
-        st.session_state.db_messages = []
-        st.session_state.llm_handler = LLMHandler(st.session_state.prompts)
-        add_message(role=SYSTEM_ROLE, content=st.session_state.prompts["welcome_message"], db=db)
-        st.rerun()
-    
-    # Display conversations
-    if not conversations:
-        st.sidebar.info("No conversations found")
-        return
-    
-    # Display conversations
-    st.sidebar.divider()
-    for conv in conversations:
-        col1, col2 = st.sidebar.columns([4, 1])
-        
-        # Determine if this is the active conversation
-        is_active = conv['id'] == st.session_state.current_conversation_id
-        
-        with col1:
-            # Show conversation title with visual indicator if active
-            title = "🟢 " + conv['title'] if is_active else conv['title']
-            if st.button(title, key=f"conv_{conv['id']}", use_container_width=True):
-                if not is_active:
-                    # Check if we're switching away from a "New Chat"
-                    current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)
-                    print(f"DEBUG - Current conversation before switch: {current_conv}")
-                    if current_conv and current_conv['title'] == "New Chat":
-                        # Queue the rename operation
-                        rename_key = f"pending_rename_{current_conv['id']}"
-                        st.session_state[rename_key] = True
-                        print(f"DEBUG - Queued rename operation: {rename_key}")
-                    
-                    # Switch to the selected conversation
-                    st.session_state.current_conversation_id = conv['id']
-                    st.session_state.db_messages = db.load_messages(conv['id'])
-                    print(f"DEBUG - Switched to conversation {conv['id']}")
-                    st.session_state.llm_handler = LLMHandler(st.session_state.prompts)
-                    for msg in st.session_state.db_messages:
-                        if msg["role"] == USER_ROLE:
-                            st.session_state.llm_handler.add_message(USER_ROLE, msg["content"])
-                        elif msg["role"] == ASSISTANT_ROLE:
-                            st.session_state.llm_handler.add_message(ASSISTANT_ROLE, msg["content"])
-                        elif msg["role"] == SYSTEM_ROLE:
-                            st.session_state.llm_handler.add_message(SYSTEM_ROLE, msg["content"])
-                    st.rerun()
-        
-        with col2:
-            # Show options menu for the conversation
-            if st.button("⋮", key=f"opt_{conv['id']}", use_container_width=True):
-                st.session_state[f"show_options_{conv['id']}"] = True
-        
-        # Show options if menu was clicked
-        if st.session_state.get(f"show_options_{conv['id']}", False):
-            with st.sidebar.expander("Options", expanded=True):
-                # Title editing
-                new_title = st.text_input("Title", value=conv['title'], key=f"title_{conv['id']}")
-                if new_title != conv['title']:
-                    db.update_conversation(conv['id'], title=new_title)
-                    st.rerun()
-                
-                # Training data flags
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("🏁 Flag" if not conv['is_flagged_for_training'] else "✅ Flagged", 
-                               key=f"flag_{conv['id']}", 
-                               type="primary" if not conv['is_flagged_for_training'] else "secondary"):
-                        db.update_conversation(conv['id'], is_flagged=not conv['is_flagged_for_training'])
-                        st.rerun()
-                
-                with col2:
-                    if st.button("🗑️ Archive" if not conv['is_archived'] else "📥 Restore",
-                               key=f"arch_{conv['id']}", 
-                               type="secondary"):
-                        db.update_conversation(conv['id'], is_archived=not conv['is_archived'])
-                        st.rerun()
-                
-                # Close options
-                if st.button("Close", key=f"close_{conv['id']}", use_container_width=True):
-                    st.session_state[f"show_options_{conv['id']}"] = False
-                    st.rerun()
-
-def extract_user_content(messages):
-    """Extract clean user message content from messages, excluding SQL/dataframe/figure elements"""
-    user_content = []
-    print(f"DEBUG - Processing {len(messages)} messages for content extraction")
-    for msg in messages:
-        if msg["role"] != USER_ROLE:
-            continue
-        
-        # Parse message elements
-        elements = get_elements(msg["content"])
-        
-        # Get markdown content if it exists
-        if "markdown" in elements:
-            user_content.append(elements["markdown"])
-            continue
-            
-        # Otherwise, use raw content if it doesn't contain any special tags
-        content = msg["content"].strip()
-        if not any(tag in content for tag in ["<sql>", "<dataframe>", "<figure>", "<error>"]):
-            user_content.append(content)
-            print(f"DEBUG - Extracted user content: {content[:50]}...")
-    
-    result = "\n---\n".join(user_content)
-    print(f"DEBUG - Final extracted content length: {len(result)} chars")
-    return result
-
-def generate_conversation_title(messages):
-    """Generate a title for a conversation based on its messages"""
-    if not messages:
-        print("DEBUG - No messages provided for title generation")
-        return None
-        
-    # Extract user messages
-    user_content = extract_user_content(messages)
-    if not user_content:
-        print("DEBUG - No user content extracted for title generation")
-        return None
-    
-    return st.session_state.llm_handler.generate_title(user_content)
-
 def main():
     st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
     
-    global logfile
+    global logfile, conv_manager
     if logfile is None:
         log_dir = f"logs/{datetime.now().strftime('%m-%d')}"
         os.makedirs(log_dir, exist_ok=True)
@@ -598,13 +390,15 @@ def main():
         sess.conn = duckdb.connect('db/list_pet.db')
         db = Database()
         db.initialize_pet_meta_schema()
-        init_session_state(sess, db)
+        conv_manager = ConversationManager(db)
+        conv_manager.init_session_state()
     else:
         db = Database()
+        conv_manager = ConversationManager(db)
     
     # Render UI
     with st.sidebar:
-        render_conversation_sidebar(db)
+        conv_manager.render_sidebar()
     
     st.title("🐾 List Pet")
     st.caption("Your friendly SQL assistant")
@@ -634,7 +428,7 @@ def main():
         if re.match(SQL_REGEX, input.strip(), re.IGNORECASE):
             input = "<sql>\n" + input + "\n</sql>\n"
         
-        add_message(role=USER_ROLE, content=input, db=db)
+        conv_manager.add_message(role=USER_ROLE, content=input)
         sess.pending_response = True
         
         # Check for SQL in input
