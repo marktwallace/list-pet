@@ -255,18 +255,22 @@ class Database:
     def execute_query(self, sql: str, params=None) -> tuple[pd.DataFrame | None, str | None]:
         """Execute SQL and return (dataframe, error_message)"""
         try:
+            print(f"DEBUG - Database executing SQL: {sql[:100]}...")
             # Check if this is a CREATE TABLE statement
             create_table_name = None
             match = re.search(self.CREATE_TABLE_REGEX, sql, re.IGNORECASE)
             if match:
                 create_table_name = match.group(1)
+                print(f"DEBUG - Detected CREATE TABLE for: {create_table_name}")
             
             # Execute the query
             try:
                 if params is not None:
+                    print(f"DEBUG - Executing with params: {params}")
                     result = self.conn.execute(sql, params)
                 else:
                     result = self.conn.execute(sql)
+                print("DEBUG - SQL execution successful")
             except Exception as e:
                 error_msg = f"SQL Error: {str(e)}"
                 print(f"ERROR - {error_msg}")

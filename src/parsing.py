@@ -15,6 +15,7 @@ SQL_REGEX = r"^\s*(?:" + \
 
 def get_elements(content):
     result = {}        
+    print(f"DEBUG - Parsing content: {content[:100]}...")
     # Updated pattern to capture tag attributes
     pattern = r'<(\w+)(\s+[^>]*)?>(?s)(.*?)</\1>'
     matches = re.finditer(pattern, content, re.DOTALL)
@@ -22,6 +23,7 @@ def get_elements(content):
         tag_name = match.group(1)
         attributes_str = match.group(2) or ""
         tag_content = match.group(3).strip()
+        print(f"DEBUG - Found tag: {tag_name}, content length: {len(tag_content)}")
         content = content.replace(match.group(0), "")
         
         # Parse attributes into a dictionary
@@ -33,6 +35,7 @@ def get_elements(content):
                 attr_name = attr_match.group(1)
                 attr_value = attr_match.group(2)
                 attributes[attr_name] = attr_value
+                print(f"DEBUG - Found attribute: {attr_name}={attr_value}")
         
         # Store both content and attributes
         if tag_name not in result:
@@ -40,6 +43,7 @@ def get_elements(content):
         result[tag_name].append({"content": tag_content, "attributes": attributes})
         
     result["markdown"] = content.strip()
+    print(f"DEBUG - Final parsed elements: {list(result.keys())}")
     return result
 
 def main():

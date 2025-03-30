@@ -228,15 +228,20 @@ def process_sql_query(sql_tuple, db):
     sess = st.session_state
     sql_idx, sql_item = sql_tuple
     sql = sql_item["content"]
+    print(f"DEBUG - Processing SQL query: {sql[:100]}...")
     msg_idx = len(sess.db_messages) - 1 
     # this is the index of the current message being processed, 
     # which is an assistant or user message with a sql tag
 
     # Execute query and handle errors
+    print(f"DEBUG - Executing SQL query with msg_idx={msg_idx}, sql_idx={sql_idx}")
     df, err = db.execute_query(sql)
     if err:
+        print(f"DEBUG - SQL execution error: {err}")
         add_message(role=USER_ROLE, content=f"<error>\n{err}\n</error>\n", db=db)
         return True
+    
+    print(f"DEBUG - SQL execution completed, dataframe is {'None' if df is None else 'not None'}")
     
     if df is None:
         return True
