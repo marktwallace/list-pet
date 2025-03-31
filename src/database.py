@@ -232,15 +232,18 @@ class Database:
             """)
             
             safe_request_text = "" if request_text is None else request_text
-            self.execute_query(f"""
+            
+            # Use direct connection execution to avoid recursion
+            self.conn.execute("""
                 INSERT INTO pet_meta.table_description 
-                (id, table_name, request_text)
+                (id, table_name, description, request_text)
                 VALUES (
                     nextval('pet_meta.table_description_seq'),
-                    '{table_name}',
-                    $1
+                    ?,
+                    ?,
+                    ?
                 )
-            """, params=[safe_request_text])
+            """, [table_name, safe_request_text, safe_request_text])
             print(f"DEBUG - Inserted new table metadata for {table_name}")
             
             return True
@@ -292,8 +295,21 @@ class Database:
                 # For non-SELECT statements
                 # Special case for CREATE TABLE to log metadata
                 if create_table_name and not create_table_name.startswith("pet_meta."):
-                    request_text = None
-                    self.log_table_creation(create_table_name, request_text)
+                    # Try to extract a meaningful description from the CREATE TABLE statement
+                    description = None
+                    if "AS" in sql.upper():
+                        # For CREATE TABLE AS queries, use the query itself as context
+                        description = f"Table created from query: {sql}"
+                    elif "(" in sql:
+                        # For explicit column definitions, extract the schema
+                        schema_match = re.search(r'\((.*?)\)', sql, re.DOTALL)
+                        if schema_match:
+                            columns = schema_match.group(1).strip()
+                            description = f"Table with columns: {columns}"
+                    
+                    # Always log table creation, even without a description
+                    print(f"DEBUG - Logging creation of table: {create_table_name}")
+                    self.log_table_creation(create_table_name, description or "")
                 
                 # For all successful non-SELECT operations, return None for the error message
                 return None, None
@@ -316,34 +332,37 @@ class Database:
                     Use DESCRIBE [table_name] to see available columns.
                 """
             
-            return None, error_msg 
+            return None, error_msg
 
     def get_table_metadata(self) -> pd.DataFrame:
         """Get metadata for all user tables, combining system catalog with our descriptions"""
         try:
             print("DEBUG - Starting table metadata query")
-            # Start with a simple query to get just the tables
             query = """
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'main'
-                ORDER BY table_name;
+                WITH user_tables AS (
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = 'main'
+                        AND table_name NOT LIKE 'pet_meta%'
+                )
+                SELECT 
+                    t.table_name,
+                    COALESCE(d.description, 'No description available. Use DESCRIBE ' || t.table_name || ' to see columns.') as description
+                FROM user_tables t
+                LEFT JOIN pet_meta.table_description d ON t.table_name = d.table_name
+                ORDER BY t.table_name;
             """
-            print("DEBUG - Executing simple table list query")
+            print("DEBUG - Executing metadata query with description join")
             df, err = self.execute_query(query)
             
             if err:
-                print(f"ERROR - Failed to get table list: {err}")
+                print(f"ERROR - Failed to get table metadata: {err}")
                 return pd.DataFrame(columns=['table_name', 'description'])
                 
             print(f"DEBUG - Query successful, got DataFrame: {df.shape if df is not None else 'None'}")
             if df is not None:
-                print(f"DEBUG - Raw table list: {df['table_name'].tolist() if not df.empty else 'no tables'}")
-                # Add description column
-                df['description'] = 'No description available'
-                # Filter out pet_meta tables
-                df = df[~df['table_name'].str.startswith('pet_meta')]
-                print(f"DEBUG - After filtering: {df['table_name'].tolist() if not df.empty else 'no tables'}")
+                table_descriptions = ['no tables'] if df.empty else [f"{row['table_name']}: {row['description']}" for _, row in df.iterrows()]
+                print("DEBUG - Tables with descriptions:", table_descriptions)
                 
             return df if df is not None else pd.DataFrame(columns=['table_name', 'description'])
             
