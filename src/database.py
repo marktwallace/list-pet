@@ -317,3 +317,37 @@ class Database:
                 """
             
             return None, error_msg 
+
+    def get_table_metadata(self) -> pd.DataFrame:
+        """Get metadata for all user tables, combining system catalog with our descriptions"""
+        try:
+            print("DEBUG - Starting table metadata query")
+            # Start with a simple query to get just the tables
+            query = """
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'main'
+                ORDER BY table_name;
+            """
+            print("DEBUG - Executing simple table list query")
+            df, err = self.execute_query(query)
+            
+            if err:
+                print(f"ERROR - Failed to get table list: {err}")
+                return pd.DataFrame(columns=['table_name', 'description'])
+                
+            print(f"DEBUG - Query successful, got DataFrame: {df.shape if df is not None else 'None'}")
+            if df is not None:
+                print(f"DEBUG - Raw table list: {df['table_name'].tolist() if not df.empty else 'no tables'}")
+                # Add description column
+                df['description'] = 'No description available'
+                # Filter out pet_meta tables
+                df = df[~df['table_name'].str.startswith('pet_meta')]
+                print(f"DEBUG - After filtering: {df['table_name'].tolist() if not df.empty else 'no tables'}")
+                
+            return df if df is not None else pd.DataFrame(columns=['table_name', 'description'])
+            
+        except Exception as e:
+            print(f"ERROR - Exception getting table metadata: {str(e)}")
+            print(f"ERROR - Table metadata traceback: {traceback.format_exc()}")
+            return pd.DataFrame(columns=['table_name', 'description']) 
