@@ -193,28 +193,38 @@ def display_figure_item(item, idx, sess, db):
 def display_message(idx, message, sess, db):
     """Display a chat message with its components"""
     with st.chat_message(message["role"], avatar=avatars.get(message["role"])):
-        msg = get_elements(message["content"])
+        # In dev mode, show raw content first
+        if sess.dev_mode:
+            # For system messages, use a more descriptive expander title
+            expander_title = "System Prompt" if message["role"] == SYSTEM_ROLE else "Raw Message Content"
+            with st.expander(expander_title, expanded=False):
+                # Use markdown with text wrapping
+                st.markdown(f"```text\n{message['content']}\n```", unsafe_allow_html=True)
         
-        if "markdown" in msg:
-            st.markdown(msg["markdown"])
-        
-        if "sql" in msg:
-            for item in msg["sql"]:
-                with st.expander(title_text(item["content"]), expanded=False):
-                    st.code(item["content"])
+        # Regular message display - only for non-system messages
+        if message["role"] != SYSTEM_ROLE:
+            msg = get_elements(message["content"])
+            
+            if "markdown" in msg:
+                st.markdown(msg["markdown"])
+            
+            if "sql" in msg:
+                for item in msg["sql"]:
+                    with st.expander(title_text(item["content"]), expanded=False):
+                        st.code(item["content"])
 
-        if "dataframe" in msg:
-            for item in msg["dataframe"]:
-                display_dataframe_item(item, idx, sess, db)
+            if "dataframe" in msg:
+                for item in msg["dataframe"]:
+                    display_dataframe_item(item, idx, sess, db)
 
-        if "figure" in msg:
-            for item in msg["figure"]:
-                display_figure_item(item, idx, sess, db)
+            if "figure" in msg:
+                for item in msg["figure"]:
+                    display_figure_item(item, idx, sess, db)
 
-        if "error" in msg:
-            for item in msg["error"]:
-                with st.expander(title_text(item["content"]), expanded=False):
-                    st.code(item["content"])
+            if "error" in msg:
+                for item in msg["error"]:
+                    with st.expander(title_text(item["content"]), expanded=False):
+                        st.code(item["content"])
 
 def process_sql_query(sql_tuple, db):
     """Process an SQL query and store results as a dataframe"""
@@ -418,6 +428,9 @@ def main():
 
     # Display chat messages
     for idx, message in enumerate(sess.db_messages):
+        # Skip system message (first message) if not in dev mode
+        if idx == 0 and not sess.dev_mode:
+            continue
         display_message(idx, message, sess, db)
 
     # Process pending items

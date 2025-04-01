@@ -88,6 +88,12 @@ class ConversationManager:
         """Render the conversation sidebar and handle conversation management"""
         st.sidebar.title("Conversations")
         
+        # Dev mode toggle
+        if 'dev_mode' not in st.session_state:
+            st.session_state.dev_mode = False
+        st.session_state.dev_mode = st.sidebar.toggle("Developer Mode", value=st.session_state.dev_mode)
+        st.sidebar.divider()
+        
         # Get all conversations first
         conversations = self.db.get_conversations()
         
@@ -224,6 +230,10 @@ class ConversationManager:
         sess.current_conversation_id = conv_id
         sess.db_messages = []
         sess.llm_handler = LLMHandler(sess.prompts, self.db)
+        
+        # Add system prompt as first message
+        system_prompt = sess.llm_handler.get_system_prompt(self.db)
+        self.add_message(role=SYSTEM_ROLE, content=system_prompt)
         
         # Add welcome message
         self.add_message(role=ASSISTANT_ROLE, content=sess.prompts["welcome_message"])
