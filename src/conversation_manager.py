@@ -74,6 +74,16 @@ class ConversationManager:
         
         return st.session_state.llm_handler.generate_title(user_content)
 
+    def _load_conversation(self, conv_id):
+        """Helper method to load a conversation and update session state"""
+        sess = st.session_state
+        sess.current_conversation_id = conv_id
+        sess.db_messages = self.db.load_messages(conv_id)
+        sess.llm_handler = LLMHandler(sess.prompts, self.db)
+        # Load messages into LLM handler
+        for msg in sess.db_messages:
+            sess.llm_handler.add_message(msg["role"], msg["content"])
+
     def render_sidebar(self):
         """Render the conversation sidebar and handle conversation management"""
         st.sidebar.title("Conversations")
@@ -156,17 +166,7 @@ class ConversationManager:
                             print(f"DEBUG - Queued rename operation: {rename_key}")
                         
                         # Switch to the selected conversation
-                        st.session_state.current_conversation_id = conv['id']
-                        st.session_state.db_messages = self.db.load_messages(conv['id'])
-                        print(f"DEBUG - Switched to conversation {conv['id']}")
-                        st.session_state.llm_handler = LLMHandler(st.session_state.prompts, self.db)
-                        for msg in st.session_state.db_messages:
-                            if msg["role"] == USER_ROLE:
-                                st.session_state.llm_handler.add_message(USER_ROLE, msg["content"])
-                            elif msg["role"] == ASSISTANT_ROLE:
-                                st.session_state.llm_handler.add_message(ASSISTANT_ROLE, msg["content"])
-                            elif msg["role"] == SYSTEM_ROLE:
-                                st.session_state.llm_handler.add_message(SYSTEM_ROLE, msg["content"])
+                        self._load_conversation(conv['id'])
                         st.rerun()
             
             with col2:
@@ -235,10 +235,18 @@ class ConversationManager:
         sess = st.session_state
         sess.prompts = get_prompts()
         
-        # Initialize new conversation
-        if self._initialize_new_conversation() is None:
-            st.error("Failed to create initial conversation")
-            return
+        # Get existing conversations
+        conversations = self.db.get_conversations()
+        
+        # Only create a new conversation if there are none
+        if not conversations:
+            if self._initialize_new_conversation() is None:
+                st.error("Failed to create initial conversation")
+                return
+        else:
+            # Use the most recent conversation
+            latest_conv = conversations[0]  # Assuming conversations are ordered by recency
+            self._load_conversation(latest_conv['id'])
             
         # Initialize other session state variables
         sess.pending_chart = False
