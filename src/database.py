@@ -255,7 +255,7 @@ class Database:
             
     CREATE_TABLE_REGEX = r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+(?:\.\w+)?)"
     
-    def execute_query(self, sql: str, params=None) -> tuple[pd.DataFrame | None, str | None]:
+    def execute_query(self, sql: str, params=None, description: str = None) -> tuple[pd.DataFrame | None, str | None]:
         """Execute SQL and return (dataframe, error_message)"""
         try:
             print(f"DEBUG - Database executing SQL: {sql[:100]}...")
@@ -295,19 +295,6 @@ class Database:
                 # For non-SELECT statements
                 # Special case for CREATE TABLE to log metadata
                 if create_table_name and not create_table_name.startswith("pet_meta."):
-                    # Try to extract a meaningful description from the CREATE TABLE statement
-                    description = None
-                    if "AS" in sql.upper():
-                        # For CREATE TABLE AS queries, use the query itself as context
-                        description = f"Table created from query: {sql}"
-                    elif "(" in sql:
-                        # For explicit column definitions, extract the schema
-                        schema_match = re.search(r'\((.*?)\)', sql, re.DOTALL)
-                        if schema_match:
-                            columns = schema_match.group(1).strip()
-                            description = f"Table with columns: {columns}"
-                    
-                    # Always log table creation, even without a description
                     print(f"DEBUG - Logging creation of table: {create_table_name}")
                     self.log_table_creation(create_table_name, description or "")
                 

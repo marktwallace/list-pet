@@ -225,10 +225,28 @@ def process_sql_query(sql_tuple, db):
     msg_idx = len(sess.db_messages) - 1 
     # this is the index of the current message being processed, 
     # which is an assistant or user message with a sql tag
+    
+    # Get the full message content for table description
+    message_content = sess.db_messages[msg_idx]["content"]
+    
+    # Extract table name from SQL for CREATE TABLE statements
+    create_table_match = re.search(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
+    description = None
+    if create_table_match:
+        table_name = create_table_match.group(1)
+        # Parse message elements
+        elements = get_elements(message_content)
+        # Look for a table description with matching table attribute
+        if "table_description" in elements:
+            for desc in elements["table_description"]:
+                if desc["attributes"].get("table") == table_name:
+                    description = desc["content"]
+                    print(f"DEBUG - Found description for table {table_name}: {description}")
+                    break
 
     # Execute query and handle errors
     print(f"DEBUG - Executing SQL query with msg_idx={msg_idx}, sql_idx={sql_idx}")
-    df, err = db.execute_query(sql)
+    df, err = db.execute_query(sql, description=description)
     if err:
         print(f"DEBUG - SQL execution error: {err}")
         conv_manager.add_message(role=USER_ROLE, content=f"<error>\n{err}\n</error>\n")
