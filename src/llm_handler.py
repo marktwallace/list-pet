@@ -11,10 +11,9 @@ class LLMHandler:
     def __init__(self, prompts, db=None):
         self.prompts = prompts
         self.messages = []
-        self._initialize_system_prompt(db)
         
-    def _initialize_system_prompt(self, db):
-        """Initialize system prompt with base prompt and table metadata if available"""
+    def get_system_prompt(self, db):
+        """Generate the system prompt with table metadata if available"""
         base_prompt = self.prompts["system_prompt"]
         
         if db is not None:
@@ -50,9 +49,8 @@ class LLMHandler:
                 )
                 base_prompt += "\n\n" + metadata_section
         
-        # Initialize with complete system prompt
         print(f"DEBUG - Final base prompt (last 500 chars): ...{base_prompt[-500:] if len(base_prompt) > 200 else base_prompt}")
-        self.messages = [SystemMessage(content=base_prompt)]
+        return base_prompt
         
     def add_message(self, role, content):
         """Add a message to the conversation history"""
@@ -104,4 +102,4 @@ class LLMHandler:
             
     def reset_conversation(self):
         """Reset the conversation history"""
-        self.messages = [SystemMessage(content=self.prompts["system_prompt"])] 
+        self.messages = [] 
