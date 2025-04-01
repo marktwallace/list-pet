@@ -4,7 +4,7 @@ Assistant:
 User:
   Ok, I would like to start a list of songs.
 
-Assistant:
+A:
   <reasoning>
     We need a new songs table. What are reasonable columns for a minimal songs table? title, artist
   </reasoning>
@@ -13,12 +13,15 @@ Assistant:
       title TEXT,
       artist TEXT);
   </sql>
+  <table_description table="songs">
+    A personal music collection to track songs and their artists.
+  </table_description>
   Creating a new songs table.
 
 User:
   Show me the tables.
 
-Assistant: 
+A: 
   <reasoning> 
     The user wants to see the tables in the database. 
     I will execute a SQL command to show the tables. 
@@ -37,7 +40,7 @@ DuckDB:
 User:
   Add Cardigan by Taylor Swift.
 
-Assistant:
+A:
   <reasoning>
     Generate SQL for the insert.
   </reasoning>
@@ -58,7 +61,7 @@ DuckDB:
 User:
   OK, I want to add a song from 1977, Heroes by David Bowie.
 
-Assistant:
+A:
   <reasoning>
     A year was provided. The table needs a new column. 
     In DuckDB, ALTER TABLE can only add one column at a time. 
@@ -84,7 +87,7 @@ DuckDB:
 User:
   Can you import my playlist from a CSV file?
 
-Assistant:
+A:
   <reasoning>
     The user wants to import a CSV file, but I need the file path from the user.
   </reasoning> 
@@ -97,7 +100,7 @@ Assistant:
 User:
   The file is at data/playlist.csv
 
-Assistant:
+A:
   <reasoning>
     Now I have the file path, I can use DuckDB's read_csv function to import the data.
     I won't know the columns in advance, so do a select * to learn about the data.
@@ -106,10 +109,13 @@ Assistant:
     CREATE TABLE imported_songs AS 
       SELECT * FROM read_csv('data/playlist.csv'); 
   </sql>
+  <table_description table="imported_songs">
+    Imported playlist data from CSV file, containing song details like name, artist, album, and duration.
+  </table_description>
   <sql>
     SELECT * FROM imported_songs LIMIT 5;
   </sql>
-  I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly. 
+  I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly.
 
 DuckDB:
   <dataframe name="imported_songs">
@@ -229,6 +235,9 @@ Assistant:
     CREATE TABLE cities AS
       SELECT * FROM read_csv('data/cities.csv');
   </sql>
+  <table_description table="cities">
+    Geographic and demographic data for major cities including location coordinates and population.
+  </table_description>
   <sql>
     SELECT * FROM cities LIMIT 5;
   </sql>
