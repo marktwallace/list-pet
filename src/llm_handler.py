@@ -8,9 +8,49 @@ from langchain_core.output_parsers import StrOutputParser
 import traceback
 
 class LLMHandler:
-    def __init__(self, prompts):
+    def __init__(self, prompts, db=None):
         self.prompts = prompts
-        self.messages = [SystemMessage(content=self.prompts["system_prompt"])]
+        self.messages = []
+        
+    def get_system_prompt(self, db):
+        """Generate the system prompt with table metadata if available"""
+        base_prompt = self.prompts["system_prompt"]
+        
+        if db is not None:
+            try:
+                # Get table metadata
+                print("DEBUG - Fetching table metadata")
+                tables_df = db.get_table_metadata()
+                print(f"DEBUG - Got table metadata DataFrame: {tables_df.shape if tables_df is not None else 'None'}")
+                
+                # Format table metadata - always show the section even if no tables
+                table_info = []
+                if tables_df is not None:
+                    for _, row in tables_df.iterrows():
+                        table_info.append(f"- {row['table_name']}: {row['description']}")
+                    print(f"DEBUG - Formatted {len(table_info)} table entries")
+                
+                if not table_info:
+                    table_info = ["No tables available yet"]
+                
+                # Add metadata section to prompt using template
+                metadata_section = self.prompts["metadata_section"].format(
+                    table_list="\n".join(table_info)
+                )
+                base_prompt += "\n\n" + metadata_section
+                print("DEBUG - Added metadata section to prompt")
+                
+            except Exception as e:
+                print(f"ERROR - Failed to process table metadata: {str(e)}")
+                print(f"ERROR - Metadata processing traceback: {traceback.format_exc()}")
+                # Still add the metadata section even if we hit an error
+                metadata_section = self.prompts["metadata_section"].format(
+                    table_list="Error retrieving table information"
+                )
+                base_prompt += "\n\n" + metadata_section
+        
+        print(f"DEBUG - Final base prompt (last 500 chars): ...{base_prompt[-500:] if len(base_prompt) > 200 else base_prompt}")
+        return base_prompt
         
     def add_message(self, role, content):
         """Add a message to the conversation history"""
@@ -62,4 +102,4 @@ class LLMHandler:
             
     def reset_conversation(self):
         """Reset the conversation history"""
-        self.messages = [SystemMessage(content=self.prompts["system_prompt"])] 
+        self.messages = [] 

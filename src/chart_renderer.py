@@ -127,6 +127,10 @@ def parse_chart_config(content: str) -> Dict[str, Any]:
         # Split the line into key and value
         key, value = [part.strip() for part in line.split(':', 1)]
         
+        # Remove inline comments (anything after #)
+        if '#' in value:
+            value = value.split('#')[0].strip()
+        
         # Handle list values (comma-separated values enclosed in square brackets)
         if value.startswith('[') and value.endswith(']'):
             value = [item.strip() for item in value[1:-1].split(',')]

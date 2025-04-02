@@ -232,15 +232,18 @@ class Database:
             """)
             
             safe_request_text = "" if request_text is None else request_text
-            self.execute_query(f"""
+            
+            # Use direct connection execution to avoid recursion
+            self.conn.execute("""
                 INSERT INTO pet_meta.table_description 
-                (id, table_name, request_text)
+                (id, table_name, description, request_text)
                 VALUES (
                     nextval('pet_meta.table_description_seq'),
-                    '{table_name}',
-                    $1
+                    ?,
+                    ?,
+                    ?
                 )
-            """, params=[safe_request_text])
+            """, [table_name, safe_request_text, safe_request_text])
             print(f"DEBUG - Inserted new table metadata for {table_name}")
             
             return True
@@ -252,7 +255,7 @@ class Database:
             
     CREATE_TABLE_REGEX = r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+(?:\.\w+)?)"
     
-    def execute_query(self, sql: str, params=None) -> tuple[pd.DataFrame | None, str | None]:
+    def execute_query(self, sql: str, params=None, description: str = None) -> tuple[pd.DataFrame | None, str | None]:
         """Execute SQL and return (dataframe, error_message)"""
         try:
             print(f"DEBUG - Database executing SQL: {sql[:100]}...")
@@ -292,8 +295,8 @@ class Database:
                 # For non-SELECT statements
                 # Special case for CREATE TABLE to log metadata
                 if create_table_name and not create_table_name.startswith("pet_meta."):
-                    request_text = None
-                    self.log_table_creation(create_table_name, request_text)
+                    print(f"DEBUG - Logging creation of table: {create_table_name}")
+                    self.log_table_creation(create_table_name, description or "")
                 
                 # For all successful non-SELECT operations, return None for the error message
                 return None, None
@@ -316,4 +319,41 @@ class Database:
                     Use DESCRIBE [table_name] to see available columns.
                 """
             
-            return None, error_msg 
+            return None, error_msg
+
+    def get_table_metadata(self) -> pd.DataFrame:
+        """Get metadata for all user tables, combining system catalog with our descriptions"""
+        try:
+            print("DEBUG - Starting table metadata query")
+            query = """
+                WITH user_tables AS (
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = 'main'
+                        AND table_name NOT LIKE 'pet_meta%'
+                )
+                SELECT 
+                    t.table_name,
+                    COALESCE(d.description, 'No description available. Use DESCRIBE ' || t.table_name || ' to see columns.') as description
+                FROM user_tables t
+                LEFT JOIN pet_meta.table_description d ON t.table_name = d.table_name
+                ORDER BY t.table_name;
+            """
+            print("DEBUG - Executing metadata query with description join")
+            df, err = self.execute_query(query)
+            
+            if err:
+                print(f"ERROR - Failed to get table metadata: {err}")
+                return pd.DataFrame(columns=['table_name', 'description'])
+                
+            print(f"DEBUG - Query successful, got DataFrame: {df.shape if df is not None else 'None'}")
+            if df is not None:
+                table_descriptions = ['no tables'] if df.empty else [f"{row['table_name']}: {row['description']}" for _, row in df.iterrows()]
+                print("DEBUG - Tables with descriptions:", table_descriptions)
+                
+            return df if df is not None else pd.DataFrame(columns=['table_name', 'description'])
+            
+        except Exception as e:
+            print(f"ERROR - Exception getting table metadata: {str(e)}")
+            print(f"ERROR - Table metadata traceback: {traceback.format_exc()}")
+            return pd.DataFrame(columns=['table_name', 'description']) 

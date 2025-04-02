@@ -74,9 +74,25 @@ class ConversationManager:
         
         return st.session_state.llm_handler.generate_title(user_content)
 
+    def _load_conversation(self, conv_id):
+        """Helper method to load a conversation and update session state"""
+        sess = st.session_state
+        sess.current_conversation_id = conv_id
+        sess.db_messages = self.db.load_messages(conv_id)
+        sess.llm_handler = LLMHandler(sess.prompts, self.db)
+        # Load messages into LLM handler
+        for msg in sess.db_messages:
+            sess.llm_handler.add_message(msg["role"], msg["content"])
+
     def render_sidebar(self):
         """Render the conversation sidebar and handle conversation management"""
         st.sidebar.title("Conversations")
+        
+        # Dev mode toggle
+        if 'dev_mode' not in st.session_state:
+            st.session_state.dev_mode = False
+        st.session_state.dev_mode = st.sidebar.toggle("Developer Mode", value=st.session_state.dev_mode)
+        st.sidebar.divider()
         
         # Get all conversations first
         conversations = self.db.get_conversations()
@@ -107,7 +123,7 @@ class ConversationManager:
             st.rerun()
         
         # New chat button
-        if st.sidebar.button("+ New Chat", type="primary", use_container_width=True):
+        if st.sidebar.button("+ New Chat", type="secondary", use_container_width=True):
             # Check if current conversation needs renaming
             current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)
             if current_conv and current_conv['title'] == "New Chat":
@@ -123,15 +139,9 @@ class ConversationManager:
                     print(f"DEBUG - Updated conversation {current_conv['id']} with new title: {new_title}")
             
             # Create new conversation and reset state
-            conv_id = self.db.create_conversation("New Chat")
-            if conv_id is None:
+            if self._initialize_new_conversation() is None:
                 st.sidebar.error("Failed to create new conversation")
                 return
-            
-            st.session_state.current_conversation_id = conv_id
-            st.session_state.db_messages = []
-            st.session_state.llm_handler = LLMHandler(st.session_state.prompts)
-            self.add_message(role=SYSTEM_ROLE, content=st.session_state.prompts["welcome_message"])
             st.rerun()
         
         # Display conversations
@@ -162,17 +172,7 @@ class ConversationManager:
                             print(f"DEBUG - Queued rename operation: {rename_key}")
                         
                         # Switch to the selected conversation
-                        st.session_state.current_conversation_id = conv['id']
-                        st.session_state.db_messages = self.db.load_messages(conv['id'])
-                        print(f"DEBUG - Switched to conversation {conv['id']}")
-                        st.session_state.llm_handler = LLMHandler(st.session_state.prompts)
-                        for msg in st.session_state.db_messages:
-                            if msg["role"] == USER_ROLE:
-                                st.session_state.llm_handler.add_message(USER_ROLE, msg["content"])
-                            elif msg["role"] == ASSISTANT_ROLE:
-                                st.session_state.llm_handler.add_message(ASSISTANT_ROLE, msg["content"])
-                            elif msg["role"] == SYSTEM_ROLE:
-                                st.session_state.llm_handler.add_message(SYSTEM_ROLE, msg["content"])
+                        self._load_conversation(conv['id'])
                         st.rerun()
             
             with col2:
@@ -192,9 +192,9 @@ class ConversationManager:
                     # Training data flags
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("🏁 Flag" if not conv['is_flagged_for_training'] else "✅ Flagged", 
+                        if st.button("❎ Training" if not conv['is_flagged_for_training'] else "✅ Training", 
                                    key=f"flag_{conv['id']}", 
-                                   type="primary" if not conv['is_flagged_for_training'] else "secondary"):
+                                   type="secondary"):
                             self.db.update_conversation(conv['id'], is_flagged=not conv['is_flagged_for_training'])
                             st.rerun()
                     
@@ -218,22 +218,47 @@ class ConversationManager:
         st.session_state.llm_handler.add_message(role, content)
         self.log(role, content)
 
+    def _initialize_new_conversation(self, title="New Chat"):
+        """Initialize a new conversation with common setup code"""
+        # Create new conversation
+        conv_id = self.db.create_conversation(title)
+        if conv_id is None:
+            return None
+            
+        # Set up session state
+        sess = st.session_state
+        sess.current_conversation_id = conv_id
+        sess.db_messages = []
+        sess.llm_handler = LLMHandler(sess.prompts, self.db)
+        
+        # Add system prompt as first message
+        system_prompt = sess.llm_handler.get_system_prompt(self.db)
+        self.add_message(role=SYSTEM_ROLE, content=system_prompt)
+        
+        # Add welcome message
+        self.add_message(role=ASSISTANT_ROLE, content=sess.prompts["welcome_message"])
+        
+        return conv_id
+
     def init_session_state(self):
         """Initialize session state with a new conversation"""
         sess = st.session_state
         sess.prompts = get_prompts()
-        sess.llm_handler = LLMHandler(sess.prompts)
         
-        # Always create a new conversation for fresh session
-        conv_id = self.db.create_conversation("New Chat")
-        if conv_id is None:
-            st.error("Failed to create initial conversation")
-            return
+        # Get existing conversations
+        conversations = self.db.get_conversations()
+        
+        # Only create a new conversation if there are none
+        if not conversations:
+            if self._initialize_new_conversation() is None:
+                st.error("Failed to create initial conversation")
+                return
+        else:
+            # Use the most recent conversation
+            latest_conv = conversations[0]  # Assuming conversations are ordered by recency
+            self._load_conversation(latest_conv['id'])
             
-        sess.current_conversation_id = conv_id
-        sess.db_messages = []
-        self.add_message(role=SYSTEM_ROLE, content=sess.prompts["welcome_message"])
-        
+        # Initialize other session state variables
         sess.pending_chart = False
         sess.pending_sql = False
         sess.pending_response = False
