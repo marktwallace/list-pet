@@ -13,6 +13,9 @@ Assistant:
       title TEXT,
       artist TEXT);
   </sql>
+  <table_description table="songs">
+    A personal music collection to track songs and their artists.
+  </table_description>
   Creating a new songs table.
 
 User:
@@ -28,7 +31,7 @@ Assistant:
   </sql>
   Here are the tables in the database.
 
-DuckDB:
+User:
   <dataframe name="tables">
     name
     songs
@@ -49,7 +52,7 @@ Assistant:
   </sql>
   Song added.
 
-DuckDB:
+User:
   <dataframe name="songs">
     title	artist
     Cardigan	Taylor Swift
@@ -74,7 +77,7 @@ Assistant:
   </sql>
   Song added.
 
-DuckDB:
+User:
   <dataframe name="songs">
     title	artist	release_year
     Cardigan	Taylor Swift	<NA>
@@ -106,12 +109,15 @@ Assistant:
     CREATE TABLE imported_songs AS 
       SELECT * FROM read_csv('data/playlist.csv'); 
   </sql>
+  <table_description table="imported_songs">
+    Imported playlist data from CSV file, containing song details like name, artist, album, and duration.
+  </table_description>
   <sql>
     SELECT * FROM imported_songs LIMIT 5;
   </sql>
-  I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly. 
+  I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly.
 
-DuckDB:
+User:
   <dataframe name="imported_songs">
     Name	Total Time	Artist	Album	Year	Genre
     Busted	02:33.986	The Black Keys	The Big Come Up	2002	Alternative
@@ -138,7 +144,7 @@ Assistant:
   </sql>
   Calculating the total length of all imported_songs.
 
-DuckDB:
+User:
   <dataframe name="imported_songs_2">
     total_seconds
     10927.468063354492
@@ -169,7 +175,7 @@ Assistant:
   </chart>
   Here is a box plot of song duration by genre.
 
-DuckDB:
+User:
   <dataframe name="imported_songs_3">
     Genre	duration_seconds
     Alternative	153.986
@@ -205,7 +211,7 @@ Assistant:
   </chart>
   Here's a pie chart showing the distribution of songs across different genres in your playlist.
 
-DuckDB:
+User:
   <dataframe name="cities">
     Genre	song_count
     Alternative	45
@@ -229,6 +235,9 @@ Assistant:
     CREATE TABLE cities AS
       SELECT * FROM read_csv('data/cities.csv');
   </sql>
+  <table_description table="cities">
+    Geographic and demographic data for major cities including location coordinates and population.
+  </table_description>
   <sql>
     SELECT * FROM cities LIMIT 5;
   </sql>
@@ -248,7 +257,7 @@ Assistant:
   I've imported your cities data and created a map showing the locations. Each point represents a city, with the size and color indicating the population. You can hover over each point to see more details.
 
 
-DuckDB:
+User:
   <dataframe name="cities">
     city	country	latitude	longitude	population
     New York	USA	40.7128	-74.0060	8804190

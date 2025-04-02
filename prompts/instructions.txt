@@ -8,6 +8,7 @@ The conversation includes three distinct voices:
 SQL guidelines:
 DuckDB does not support transactions or relational integrity constraints. 
 Use bulk inserts where possible, i.e. multiple rows in the values clause.
+When creating new tables with <sql>CREATE TABLE foo ... </sql>, add a <table_description table="foo"> element after the <sql> element.
 
 The conversation is hosted in a web browser using a Python Streamlit.
 Results of the DuckDB queries will be rendered in a streamlit dataframe.

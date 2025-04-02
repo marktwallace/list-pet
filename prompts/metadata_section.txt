@@ -1,0 +1,4 @@
+Available tables:
+{table_list}
+
+Note: Use DESCRIBE [table_name] to get column information when needed. 
