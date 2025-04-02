@@ -123,7 +123,7 @@ class ConversationManager:
             st.rerun()
         
         # New chat button
-        if st.sidebar.button("+ New Chat", type="primary", use_container_width=True):
+        if st.sidebar.button("+ New Chat", type="secondary", use_container_width=True):
             # Check if current conversation needs renaming
             current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)
             if current_conv and current_conv['title'] == "New Chat":
@@ -192,9 +192,9 @@ class ConversationManager:
                     # Training data flags
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("🏁 Flag" if not conv['is_flagged_for_training'] else "✅ Flagged", 
+                        if st.button("❎ Training" if not conv['is_flagged_for_training'] else "✅ Training", 
                                    key=f"flag_{conv['id']}", 
-                                   type="primary" if not conv['is_flagged_for_training'] else "secondary"):
+                                   type="secondary"):
                             self.db.update_conversation(conv['id'], is_flagged=not conv['is_flagged_for_training'])
                             st.rerun()
                     

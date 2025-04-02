@@ -4,7 +4,7 @@ Assistant:
 User:
   Ok, I would like to start a list of songs.
 
-A:
+Assistant:
   <reasoning>
     We need a new songs table. What are reasonable columns for a minimal songs table? title, artist
   </reasoning>
@@ -21,7 +21,7 @@ A:
 User:
   Show me the tables.
 
-A: 
+Assistant: 
   <reasoning> 
     The user wants to see the tables in the database. 
     I will execute a SQL command to show the tables. 
@@ -31,7 +31,7 @@ A:
   </sql>
   Here are the tables in the database.
 
-DuckDB:
+User:
   <dataframe name="tables">
     name
     songs
@@ -40,7 +40,7 @@ DuckDB:
 User:
   Add Cardigan by Taylor Swift.
 
-A:
+Assistant:
   <reasoning>
     Generate SQL for the insert.
   </reasoning>
@@ -52,7 +52,7 @@ A:
   </sql>
   Song added.
 
-DuckDB:
+User:
   <dataframe name="songs">
     title	artist
     Cardigan	Taylor Swift
@@ -61,7 +61,7 @@ DuckDB:
 User:
   OK, I want to add a song from 1977, Heroes by David Bowie.
 
-A:
+Assistant:
   <reasoning>
     A year was provided. The table needs a new column. 
     In DuckDB, ALTER TABLE can only add one column at a time. 
@@ -77,7 +77,7 @@ A:
   </sql>
   Song added.
 
-DuckDB:
+User:
   <dataframe name="songs">
     title	artist	release_year
     Cardigan	Taylor Swift	<NA>
@@ -87,7 +87,7 @@ DuckDB:
 User:
   Can you import my playlist from a CSV file?
 
-A:
+Assistant:
   <reasoning>
     The user wants to import a CSV file, but I need the file path from the user.
   </reasoning> 
@@ -100,7 +100,7 @@ A:
 User:
   The file is at data/playlist.csv
 
-A:
+Assistant:
   <reasoning>
     Now I have the file path, I can use DuckDB's read_csv function to import the data.
     I won't know the columns in advance, so do a select * to learn about the data.
@@ -117,7 +117,7 @@ A:
   </sql>
   I've imported your playlist. Here are the first 5 songs to confirm the import worked correctly.
 
-DuckDB:
+User:
   <dataframe name="imported_songs">
     Name	Total Time	Artist	Album	Year	Genre
     Busted	02:33.986	The Black Keys	The Big Come Up	2002	Alternative
@@ -144,7 +144,7 @@ Assistant:
   </sql>
   Calculating the total length of all imported_songs.
 
-DuckDB:
+User:
   <dataframe name="imported_songs_2">
     total_seconds
     10927.468063354492
@@ -175,7 +175,7 @@ Assistant:
   </chart>
   Here is a box plot of song duration by genre.
 
-DuckDB:
+User:
   <dataframe name="imported_songs_3">
     Genre	duration_seconds
     Alternative	153.986
@@ -211,7 +211,7 @@ Assistant:
   </chart>
   Here's a pie chart showing the distribution of songs across different genres in your playlist.
 
-DuckDB:
+User:
   <dataframe name="cities">
     Genre	song_count
     Alternative	45
@@ -257,7 +257,7 @@ Assistant:
   I've imported your cities data and created a map showing the locations. Each point represents a city, with the size and color indicating the population. You can hover over each point to see more details.
 
 
-DuckDB:
+User:
   <dataframe name="cities">
     city	country	latitude	longitude	population
     New York	USA	40.7128	-74.0060	8804190
