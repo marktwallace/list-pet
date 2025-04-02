@@ -33,7 +33,7 @@ avatars = {
 
 def title_text(input):
     """Helper function to truncate titles"""
-    return input[:90] + "..." if len(input) > 60 else input
+    return input if len(input) <= 120 else input[:117] + "..."
 
 def validate_element_indices(attributes, required_attrs, element_type="element"):
     """
@@ -55,7 +55,7 @@ def validate_element_indices(attributes, required_attrs, element_type="element")
 
 def handle_regenerate_button(button_key, sql, db, dataframe_key):
     """Handle regeneration button for dataframes and figures"""
-    if st.button("Regenerate", key=button_key, type="primary", use_container_width=True):
+    if st.button("🔍 Regenerate", key=button_key, type="secondary", use_container_width=False):
         df, err = db.execute_query(sql)
         if err:
             print(f"ERROR - {err} for regeneration while rerunning SQL: {sql}")
