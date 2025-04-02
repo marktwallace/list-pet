@@ -159,8 +159,9 @@ class ConversationManager:
             
             with col1:
                 # Show conversation title with visual indicator if active
-                title = "🟢 " + conv['title'] if is_active else conv['title']
-                if st.button(title, key=f"conv_{conv['id']}", use_container_width=True):
+                title = conv['title']
+                button_type = "primary" if is_active else "secondary"
+                if st.button(title, key=f"conv_{conv['id']}", use_container_width=True, type=button_type):
                     if not is_active:
                         # Check if we're switching away from a "New Chat"
                         current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)

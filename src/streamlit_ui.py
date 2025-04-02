@@ -22,6 +22,7 @@ from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
 from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
+from .ui_styles import CODE_WRAP_STYLE
 
 conv_manager = None
 
@@ -404,6 +405,9 @@ def generate_llm_response():
 
 def main():
     st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
+    
+    # Add CSS styles
+    st.markdown(CODE_WRAP_STYLE, unsafe_allow_html=True)
     
     global conv_manager
     
