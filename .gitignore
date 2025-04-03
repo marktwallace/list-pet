@@ -177,3 +177,4 @@ db/
 # Dumps
 dumps/
 logs/
+training/

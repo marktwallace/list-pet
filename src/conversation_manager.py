@@ -93,6 +93,16 @@ class ConversationManager:
         if 'dev_mode' not in st.session_state:
             st.session_state.dev_mode = False
         st.session_state.dev_mode = st.sidebar.toggle("Developer Mode", value=st.session_state.dev_mode)
+        
+        # Add Export Training button in dev mode
+        if st.session_state.dev_mode:
+            if st.sidebar.button("Export Training", type="secondary", use_container_width=True):
+                exported_count, timestamp = self.export_training_data()
+                if exported_count > 0:
+                    st.sidebar.success(f"✅ Exported {exported_count} conversations to training/{timestamp}/")
+                else:
+                    st.sidebar.warning("No conversations flagged for training found.")
+        
         st.sidebar.divider()
         
         # Get all conversations first
@@ -243,6 +253,41 @@ class ConversationManager:
         self.add_message(role=ASSISTANT_ROLE, content=sess.prompts["welcome_message"])
         
         return conv_id
+
+    def export_training_data(self):
+        """Export conversations flagged for training to text files."""
+        # Create timestamped directory
+        timestamp = datetime.now().strftime('%m-%d-%H-%M')
+        export_dir = f"training/{timestamp}"
+        os.makedirs(export_dir, exist_ok=True)
+        
+        # Get all conversations flagged for training
+        conversations = self.db.get_conversations(include_archived=True)
+        exported_count = 0
+        
+        for conv in conversations:
+            if not conv['is_flagged_for_training']:
+                continue
+                
+            # Load messages for this conversation
+            messages = self.db.load_messages(conv['id'])
+            if not messages:
+                continue
+                
+            # Create file with conversation title as name
+            filename = f"{conv['title']}.txt"
+            filepath = os.path.join(export_dir, filename)
+            
+            with open(filepath, 'w') as f:
+                for msg in messages:
+                    # Write role on its own line
+                    f.write(f"{msg['role'].capitalize()}:\n")
+                    # Write message content
+                    f.write(f"{msg['content']}\n\n")
+            
+            exported_count += 1
+            
+        return exported_count, timestamp
 
     def init_session_state(self):
         """Initialize session state with a new conversation"""
