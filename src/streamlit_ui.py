@@ -22,7 +22,7 @@ from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
 from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
-from .ui_styles import CODE_WRAP_STYLE
+from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON
 
 conv_manager = None
 
@@ -408,6 +408,7 @@ def main():
     
     # Add CSS styles
     st.markdown(CODE_WRAP_STYLE, unsafe_allow_html=True)
+    st.markdown(CONVERSATION_BUTTON_STYLE, unsafe_allow_html=True)
     
     global conv_manager
     

@@ -6,6 +6,7 @@ from .database import Database
 from .llm_handler import LLMHandler
 from .parsing import get_elements
 from .prompt_loader import get_prompts
+from .ui_styles import TRAIN_ICON
 
 # Define roles
 USER_ROLE = "user"
@@ -123,10 +124,10 @@ class ConversationManager:
             st.rerun()
         
         # New chat button
-        if st.sidebar.button("+ New Chat", type="secondary", use_container_width=True):
+        if st.sidebar.button("+ New Conversation", key="new-conversation-button", type="secondary", use_container_width=True, kwargs={"class": "new-conversation-button"}):
             # Check if current conversation needs renaming
             current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)
-            if current_conv and current_conv['title'] == "New Chat":
+            if current_conv and current_conv['title'] == "Unlabeled Chat":
                 # Process the rename immediately instead of queuing
                 print(f"DEBUG - Processing rename for conversation {current_conv['id']} before creating new chat")
                 messages = self.db.load_messages(current_conv['id'])
@@ -160,13 +161,15 @@ class ConversationManager:
             with col1:
                 # Show conversation title with visual indicator if active
                 title = conv['title']
+                if conv['is_flagged_for_training']:
+                    title = f"{TRAIN_ICON} {title}"
                 button_type = "primary" if is_active else "secondary"
                 if st.button(title, key=f"conv_{conv['id']}", use_container_width=True, type=button_type):
                     if not is_active:
                         # Check if we're switching away from a "New Chat"
                         current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)
                         print(f"DEBUG - Current conversation before switch: {current_conv}")
-                        if current_conv and current_conv['title'] == "New Chat":
+                        if current_conv and current_conv['title'] == "Unlabeled Chat":
                             # Queue the rename operation
                             rename_key = f"pending_rename_{current_conv['id']}"
                             st.session_state[rename_key] = True
@@ -219,7 +222,7 @@ class ConversationManager:
         st.session_state.llm_handler.add_message(role, content)
         self.log(role, content)
 
-    def _initialize_new_conversation(self, title="New Chat"):
+    def _initialize_new_conversation(self, title="Unlabeled Chat"):
         """Initialize a new conversation with common setup code"""
         # Create new conversation
         conv_id = self.db.create_conversation(title)
