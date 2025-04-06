@@ -356,4 +356,29 @@ class Database:
         except Exception as e:
             print(f"ERROR - Exception getting table metadata: {str(e)}")
             print(f"ERROR - Table metadata traceback: {traceback.format_exc()}")
-            return pd.DataFrame(columns=['table_name', 'description']) 
+            return pd.DataFrame(columns=['table_name', 'description'])
+
+    def trim_conversation_after_message(self, conversation_id: int, message_id: int) -> bool:
+        """Delete all messages after the specified message ID in a conversation"""
+        try:
+            # Delete messages after the given message_id
+            self.conn.execute("""
+                DELETE FROM pet_meta.message_log
+                WHERE conversation_id = ?
+                AND id >= ?
+            """, [conversation_id, message_id])
+            
+            # Update conversation last_updated timestamp
+            self.conn.execute("""
+                UPDATE pet_meta.conversations
+                SET last_updated = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, [conversation_id])
+            
+            print(f"DEBUG - Trimmed conversation {conversation_id} after message {message_id}")
+            return True
+        except Exception as e:
+            error_msg = f"Failed to trim conversation: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - Conversation trim traceback: {traceback.format_exc()}")
+            return False 

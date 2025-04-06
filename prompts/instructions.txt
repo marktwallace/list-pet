@@ -23,7 +23,7 @@ Use this format for 2D plots like bar charts, line plots, histograms, and box pl
   y: value_column
   title: Chart Title
   text: label_column
-  hovertext: field1, field2
+  hovertext: [field1, field2]
   marker_color: #636efa
 </chart>
 
@@ -35,7 +35,7 @@ For scatter plots, which can represent three dimensions of data, you can also us
   y: y_column
   title: Chart Title
   text: label_column
-  hovertext: field1, field2
+  hovertext: [field1, field2]
   marker_color: #636efa
   marker_size: magnitude_column  # Optional: Use a numeric column to size points by their values
                                 # Or use a constant number for uniform size (e.g., marker_size: 10)
@@ -49,7 +49,7 @@ Use this example for pie charts:
   values: numeric_column
   title: Chart Title
   text: label_column
-  hovertext: field1, field2
+  hovertext: [field1, field2]
   hole: 0.3
 </chart>
 
@@ -62,7 +62,7 @@ go.Scattermapbox, go.Linemapbox have the following fields:
   lon: longitude_column
   title: Chart Title
   text: label_column
-  hovertext: field1, field2, field3
+  hovertext: [field1, field2, field3]
   marker_color: column_or_constant
   marker_size: magnitude_column
   zoom: 4
@@ -81,7 +81,7 @@ go.Choroplethmapbox have the following fields:
   featureidkey: properties.region_id
   marker_color: numeric_column
   title: Chart Title
-  hovertext: field1, field2
+  hovertext: [field1, field2]
   mapbox_style: open-street-map
   zoom: 3
   center: us

@@ -108,6 +108,7 @@ def render_chart(df: pd.DataFrame, content: str) -> Tuple[go.Figure, Optional[st
 def parse_chart_config(content: str) -> Dict[str, Any]:
     """
     Parses the YAML-like chart configuration string into a dictionary.
+    Supports both bracketed lists [item1, item2] and single values.
     
     Args:
         content: The chart configuration string
@@ -131,9 +132,14 @@ def parse_chart_config(content: str) -> Dict[str, Any]:
         if '#' in value:
             value = value.split('#')[0].strip()
         
-        # Handle list values (comma-separated values enclosed in square brackets)
+        # Handle bracketed lists
         if value.startswith('[') and value.endswith(']'):
-            value = [item.strip() for item in value[1:-1].split(',')]
+            # Extract content between brackets and split on commas
+            list_content = value[1:-1].strip()
+            if list_content:  # Only split if there's content
+                value = [item.strip() for item in list_content.split(',')]
+            else:
+                value = []  # Empty list case: []
         
         config[key] = value
 

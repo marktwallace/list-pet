@@ -246,7 +246,7 @@ Assistant:
     lat: latitude
     lon: longitude
     text: city
-    hovertext: [city, population, country]
+    hovertext: city, population, country
     marker_size: population
     marker_color: population
     title: Cities by Population
@@ -284,3 +284,46 @@ Assistant:
     );
   </sql>
   I've found some datasets about electric vehicles. Let me show you what's available.
+
+User:
+I want to make a list of Pokemon cards I want to collect
+
+Assistant:
+  <reasoning>
+    We need to create a new table for the Pokémon cards again. Reasonable columns could include name, type, rarity, and set.
+  </reasoning>
+  <sql>
+    CREATE TABLE pokemon_cards (
+      name TEXT,
+      type TEXT,
+      rarity TEXT,
+      set TEXT);
+  </sql>
+  <table_description table="pokemon_cards">
+    A personal collection list for Pokémon cards, including details like name, type, rarity, and set.
+  </table_description>
+  Creating a new table for your Pokémon card collection.
+
+User:
+Add Snorlax and Farfetch'd
+
+Assistant:
+  <reasoning>
+    I will perform a bulk insert to add Snorlax and Farfetch'd to the `pokemon_cards` table. I will ensure to escape the single quote in "Farfetch'd" correctly using two single quotes.
+  </reasoning>
+  <sql>
+    INSERT INTO pokemon_cards (name, type, rarity, set) VALUES 
+    ('Snorlax', 'Normal', 'Rare', 'Base Set'),
+    ('Farfetch''d', 'Normal', 'Common', 'Base Set');
+  </sql>
+  <sql>
+    SELECT * FROM pokemon_cards;
+  </sql>
+  Snorlax and Farfetch'd have been added to your collection list.
+
+User:
+<dataframe name="pokemon_cards_5" table="pokemon_cards" sql_msg_idx="32" sql_tag_idx="1" >
+name	type	rarity	set
+Snorlax	Normal	Rare	Base Set
+Farfetch'd	Normal	Common	Base Set
+</dataframe>
