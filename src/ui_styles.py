@@ -86,6 +86,54 @@ CONVERSATION_BUTTON_STYLE = """
     width: 48px !important;
     height: 48px !important;
 }
+
+/* Message background consistency */
+[data-testid="stChatMessageContent"] {
+    background-color: transparent !important;
+}
+
+/* Target the specific message containers */
+.stChatMessage {
+    background-color: transparent !important;
+}
+
+/* Target the user message container specifically */
+.stChatMessage[data-testid="user-message"] {
+    background-color: transparent !important;
+}
+
+/* Target any potential wrapper divs */
+.stChatMessage > div,
+.stChatMessage [data-testid="stChatMessageContent"] > div {
+    background-color: transparent !important;
+}
+
+/* Ensure chat message containers have dark background */
+.stChatMessage [data-testid="chatAvatarIcon-user"],
+.stChatMessage [data-testid="chatAvatarIcon-assistant"] {
+    background-color: transparent !important;
+}
+
+/* Trim button styling */
+button[data-testid="baseButton-secondary"]:has(div:contains("✂️")) {
+    background-color: #ff4444 !important;
+    border-color: #ff4444 !important;
+    color: white !important;
+    width: 80px !important;  /* Fixed width */
+    min-width: unset !important;
+    padding: 0.5rem 0.25rem !important;
+}
+
+button[data-testid="baseButton-secondary"]:has(div:contains("✂️")):hover {
+    background-color: #cc0000 !important;
+    border-color: #cc0000 !important;
+}
+
+/* Center text in trim button */
+button[data-testid="baseButton-secondary"]:has(div:contains("✂️")) div[data-testid="stMarkdownContainer"] {
+    text-align: center !important;
+    width: 100% !important;
+}
 </style>
 """
 

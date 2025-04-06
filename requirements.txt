@@ -9,3 +9,4 @@ plotly
 pandas
 openai
 python-dotenv
+typer

@@ -194,13 +194,43 @@ def display_figure_item(item, idx, sess, db):
 def display_message(idx, message, sess, db):
     """Display a chat message with its components"""
     with st.chat_message(message["role"], avatar=avatars.get(message["role"])):
-        # In dev mode, show raw content first
+        # In dev mode, show raw content and trim button in columns
         if sess.dev_mode:
-            # For system messages, use a more descriptive expander title
-            expander_title = "System Prompt" if message["role"] == SYSTEM_ROLE else "Raw Message Content"
-            with st.expander(expander_title, expanded=False):
-                # Use markdown with text wrapping
-                st.markdown(f"```text\n{message['content']}\n```", unsafe_allow_html=True)
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                # For system messages, use a more descriptive expander title
+                expander_title = "System Prompt" if message["role"] == SYSTEM_ROLE else "Raw Message Content"
+                with st.expander(expander_title, expanded=False):
+                    # Use markdown with text wrapping
+                    st.markdown(f"```text\n{message['content']}\n```", unsafe_allow_html=True)
+            
+            # Only show trim button for non-system messages after the first message
+            if message["role"] != SYSTEM_ROLE and idx > 0:
+                with col2:
+                    if st.button("✂️ Trim", key=f"trim_{idx}", use_container_width=True):
+                        # Get message ID from database
+                        results = db.conn.execute("""
+                            SELECT id 
+                            FROM pet_meta.message_log 
+                            WHERE conversation_id = ? 
+                            ORDER BY id ASC
+                            LIMIT 1 OFFSET ?
+                        """, [sess.current_conversation_id, idx]).fetchone()
+                        
+                        if results:
+                            message_id = results[0]
+                            if db.trim_conversation_after_message(sess.current_conversation_id, message_id):
+                                # Reload conversation
+                                sess.db_messages = db.load_messages(sess.current_conversation_id)
+                                sess.llm_handler.messages = []  # Reset LLM history
+                                # Reload messages into LLM handler
+                                for msg in sess.db_messages:
+                                    sess.llm_handler.add_message(msg["role"], msg["content"])
+                                st.rerun()
+                            else:
+                                st.error("Failed to trim conversation")
+                        else:
+                            st.error("Could not find message ID for trimming")
         
         # Regular message display - only for non-system messages
         if message["role"] != SYSTEM_ROLE:
