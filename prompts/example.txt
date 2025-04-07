@@ -166,7 +166,7 @@ Assistant:
       CAST(SPLIT_PART("Total Time", ':', 2) AS FLOAT) as duration_seconds
     FROM imported_songs;
   </sql>
-  <chart dataframe="imported_songs"> 
+  <chart tablename="imported_songs"> 
     type: box
     x: Genre
     y: duration_seconds
@@ -202,7 +202,7 @@ Assistant:
     GROUP BY Genre 
     ORDER BY song_count DESC;
   </sql>
-  <chart dataframe="imported_songs">
+  <chart tablename="imported_songs">
     type: pie
     labels: Genre
     values: song_count
@@ -241,12 +241,12 @@ Assistant:
   <sql>
     SELECT * FROM cities LIMIT 5;
   </sql>
-  <chart dataframe="cities">
+  <chart tablename="cities">
     type: scatter_mapbox
     lat: latitude
     lon: longitude
     text: city
-    hovertext: city, population, country
+    hovertext: [city, population, country]
     marker_size: population
     marker_color: population
     title: Cities by Population

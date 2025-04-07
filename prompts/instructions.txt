@@ -17,7 +17,7 @@ The <chart> elements are implemented using Plotly Graph Objects (GO), not Plotly
 
 Use this format for 2D plots like bar charts, line plots, histograms, and box plots:
 
-<chart dataframe="data_frame_name">
+<chart tablename="table_name">
   type: bar
   x: category_column
   y: value_column
@@ -29,7 +29,7 @@ Use this format for 2D plots like bar charts, line plots, histograms, and box pl
 
 For scatter plots, which can represent three dimensions of data, you can also use marker_size:
 
-<chart dataframe="data_frame_name">
+<chart tablename="table_name">
   type: scatter
   x: x_column
   y: y_column
@@ -43,7 +43,7 @@ For scatter plots, which can represent three dimensions of data, you can also us
 
 Use this example for pie charts:
 
-<chart dataframe="data_frame_name">
+<chart tablename="table_name">
   type: pie
   labels: category_column
   values: numeric_column
@@ -56,7 +56,7 @@ Use this example for pie charts:
 The <chart> elements that represent maps use Plotly Graph Objects.
 go.Scattermapbox, go.Linemapbox have the following fields:
 
-<chart dataframe="data_frame_name">
+<chart tablename="table_name">
   type: scatter_mapbox
   lat: latitude_column
   lon: longitude_column
@@ -74,7 +74,7 @@ Use a numeric column (e.g., population, magnitude) to size points by their value
 
 go.Choroplethmapbox have the following fields:
 
-<chart dataframe="data_frame_name">
+<chart tablename="table_name">
   type: choropleth_mapbox
   geojson: path_or_object
   locations: region_column
