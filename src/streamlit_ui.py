@@ -7,6 +7,9 @@ import duckdb
 import streamlit as st
 import pandas as pd
 
+# Set pandas display options for better float formatting
+pd.set_option('display.float_format', lambda x: '{:.3f}'.format(x) if abs(x) < 1000 else '{:.1f}'.format(x))
+
 from langchain_core.prompts import (
     SystemMessagePromptTemplate,
     HumanMessagePromptTemplate,
@@ -396,9 +399,8 @@ def process_chart_request(chart_tuple):
     dataframe_key = "dataframe_" + dataframe_name
     if dataframe_key in sess:
         df = sess[dataframe_key]
-        # Include tablename in chart configuration
-        chart_config = f"tablename: {table_name}\n{chart_content}"
-        fig, err = render_chart(df, chart_config)
+        # Pass chart content directly without prepending tablename
+        fig, err = render_chart(df, chart_content)
         figure_key = get_figure_key(chart_idx, dataframe_name, chart_content)
         
         if err:
