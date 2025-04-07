@@ -54,6 +54,25 @@ def validate_element_indices(attributes, required_attrs, element_type="element")
             st.error(f"Error processing {desc} indices: {str(e)}")
             return None, None
 
+def update_dataframe_mapping(sess, sql: str, dataframe_key: str) -> str:
+    """
+    Extract table name from SQL and update the latest_dataframes mapping.
+    Returns the new dataframe name.
+    """
+    # Extract table name from SQL
+    table_match = re.search(r"FROM\s+(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
+    table_name = table_match.group(1) if table_match else "unknown"
+    
+    # Update table counter and latest_dataframes mapping
+    if table_name not in sess.table_counters:
+        sess.table_counters[table_name] = 1
+    else:
+        sess.table_counters[table_name] += 1
+    
+    dataframe_name = f"{table_name}_{sess.table_counters[table_name]}"
+    sess.latest_dataframes[table_name] = dataframe_name
+    return dataframe_name
+
 def handle_regenerate_button(button_key, sql, db, dataframe_key):
     """Handle regeneration button for dataframes and figures"""
     if st.button("🔍 Regenerate", key=button_key, type="secondary", use_container_width=False):
@@ -62,6 +81,7 @@ def handle_regenerate_button(button_key, sql, db, dataframe_key):
             print(f"ERROR - {err} for regeneration while rerunning SQL: {sql}")
             return False
         else:
+            update_dataframe_mapping(st.session_state, sql, dataframe_key)
             st.session_state[dataframe_key] = df
             st.rerun()
     return False
@@ -263,9 +283,7 @@ def process_sql_query(sql_tuple, db):
     sql_idx, sql_item = sql_tuple
     sql = sql_item["content"]
     print(f"DEBUG - Processing SQL query: {sql[:100]}...")
-    msg_idx = len(sess.db_messages) - 1 
-    # this is the index of the current message being processed, 
-    # which is an assistant or user message with a sql tag
+    msg_idx = len(sess.db_messages) - 1
     
     # Get the full message content for table description
     message_content = sess.db_messages[msg_idx]["content"]
@@ -284,7 +302,7 @@ def process_sql_query(sql_tuple, db):
                     description = desc["content"]
                     print(f"DEBUG - Found description for table {table_name}: {description}")
                     break
-
+    
     # Execute query and handle errors
     print(f"DEBUG - Executing SQL query with msg_idx={msg_idx}, sql_idx={sql_idx}")
     df, err = db.execute_query(sql, description=description)
@@ -298,19 +316,8 @@ def process_sql_query(sql_tuple, db):
     if df is None:
         return True
     
-    # Extract table name from SQL
-    table_match = re.search(r"FROM\s+(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
-    table_name = table_match.group(1) if table_match else "unknown"
-    print(f"DEBUG - Using table name: {table_name} for dataframe")
-    
-    # Create semantic ID
-    if table_name not in sess.table_counters:
-        sess.table_counters[table_name] = 1
-    else:
-        sess.table_counters[table_name] += 1
-    
-    dataframe_name = f"{table_name}_{sess.table_counters[table_name]}"
-    sess.latest_dataframes[table_name] = dataframe_name
+    # Update dataframe mapping and get new name
+    dataframe_name = update_dataframe_mapping(sess, sql, None)
     
     # Store dataframe in session state
     dataframe_key = f"dataframe_{dataframe_name}"
@@ -324,7 +331,7 @@ def process_sql_query(sql_tuple, db):
         tsv_lines.append("...")
     
     # Create and add dataframe message
-    content = f'<dataframe name="{dataframe_name}" table="{table_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
+    content = f'<dataframe name="{dataframe_name}" table="{dataframe_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
     content += "\n".join(tsv_lines) + "\n</dataframe>\n"
     
     print(f"DEBUG - Adding dataframe with name: {dataframe_name}")
@@ -339,13 +346,16 @@ def process_chart_request(chart_tuple):
     chart_attrs = chart_item["attributes"]
     
     # Validate chart request
-    df_reference = chart_attrs.get("dataframe")
-    if not df_reference:
-        conv_manager.add_message(role=USER_ROLE, content="<error>\nChart missing dataframe reference\n</error>\n")
+    table_name = chart_attrs.get("tablename")
+    if not table_name:
+        conv_manager.add_message(role=USER_ROLE, content="<error>\nChart missing tablename reference\n</error>\n")
         return True
     
-    # Resolve dataframe reference (table name or direct dataframe name)
-    dataframe_name = sess.latest_dataframes.get(df_reference, df_reference)
+    # Get the latest dataframe name for this table
+    dataframe_name = sess.latest_dataframes.get(table_name)
+    if not dataframe_name:
+        conv_manager.add_message(role=USER_ROLE, content=f"<error>\nNo data available for table '{table_name}'\n</error>\n")
+        return True
     
     # Find the dataframe and its SQL indices
     def find_dataframe_sql_indices():
@@ -386,7 +396,9 @@ def process_chart_request(chart_tuple):
     dataframe_key = "dataframe_" + dataframe_name
     if dataframe_key in sess:
         df = sess[dataframe_key]
-        fig, err = render_chart(df, chart_content)
+        # Include tablename in chart configuration
+        chart_config = f"tablename: {table_name}\n{chart_content}"
+        fig, err = render_chart(df, chart_config)
         figure_key = get_figure_key(chart_idx, dataframe_name, chart_content)
         
         if err:

@@ -344,6 +344,11 @@ def create_scatter_mapbox(df: pd.DataFrame, config: Dict[str, Any]) -> go.Figure
     # Get text field if specified
     text = df[config['text']] if 'text' in config and config['text'] in df.columns else None
     
+    # Handle marker size scaling only if it's a list/array
+    sizeref = None
+    if marker_size is not None and not isinstance(marker_size, (int, float)):
+        sizeref = 2.*max(marker_size)/(40.**2)
+    
     # Create the figure
     fig = go.Figure(go.Scattermapbox(
         lat=df[lat],
@@ -355,7 +360,7 @@ def create_scatter_mapbox(df: pd.DataFrame, config: Dict[str, Any]) -> go.Figure
             color=marker_color,
             colorscale='Viridis' if marker_color is not None and not isinstance(marker_color, str) else None,
             sizemode='area',
-            sizeref=2.*max(marker_size)/(40.**2) if marker_size is not None and not isinstance(marker_size, str) else None,
+            sizeref=sizeref,
             sizemin=4
         ),
         hovertext=get_hover_text(df, config),
