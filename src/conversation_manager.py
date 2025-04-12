@@ -306,10 +306,21 @@ class ConversationManager:
             # Use the most recent conversation
             latest_conv = conversations[0]  # Assuming conversations are ordered by recency
             self._load_conversation(latest_conv['id'])
-            
+        
         # Initialize other session state variables
-        sess.pending_chart = False
-        sess.pending_sql = False
-        sess.pending_response = False
-        sess.table_counters = {}
-        sess.latest_dataframes = {} 
+        if "pending_response" not in sess:
+            sess.pending_response = False
+        if "pending_sql" not in sess:
+            sess.pending_sql = []
+        if "pending_chart" not in sess:
+            sess.pending_chart = []
+        if "pending_python" not in sess:
+            sess.pending_python = []
+        if "table_counters" not in sess:
+            sess.table_counters = {}
+        if "latest_dataframes" not in sess:
+            sess.latest_dataframes = {}
+        if "dev_mode" not in sess:
+            sess.dev_mode = False
+        if "llm_handler" not in sess:
+            sess.llm_handler = LLMHandler(get_prompts()) 

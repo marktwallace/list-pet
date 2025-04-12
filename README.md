@@ -90,7 +90,11 @@ The app will create a local database at `db/list_pet.db`. You can delete or move
 
 Data is stored in DuckDB tables. The message history is stored in a separate `pet-meta` schema, which includes all saved conversations.
 
-**TODO:** Build CLI tools to export fine-tuning data from saved conversations.
+## Running unit tests
+```
+python -m src.chart_renderer
+python -m src.python_executor
+```
 
 ---
 

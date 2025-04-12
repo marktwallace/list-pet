@@ -27,6 +27,7 @@ from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
 from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
 from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON
+from .python_executor import execute_python_code
 
 conv_manager = None
 
@@ -278,6 +279,11 @@ def display_message(idx, message, sess, db):
                     with st.expander(title_text(item["content"]), expanded=False):
                         st.code(item["content"])
 
+            if "python" in msg:
+                for item in msg["python"]:
+                    with st.expander(title_text(item["content"]), expanded=False):
+                        st.code(item["content"], language="python")
+
             if "dataframe" in msg:
                 for item in msg["dataframe"]:
                     display_dataframe_item(item, idx, sess, db)
@@ -285,6 +291,11 @@ def display_message(idx, message, sess, db):
             if "figure" in msg:
                 for item in msg["figure"]:
                     display_figure_item(item, idx, sess, db)
+
+            if "metadata" in msg:
+                for item in msg["metadata"]:
+                    with st.expander("Metadata", expanded=True):
+                        st.code(item["content"])
 
             if "error" in msg:
                 for item in msg["error"]:
@@ -450,6 +461,79 @@ def process_chart_request(chart_tuple):
     conv_manager.add_message(role=USER_ROLE, content=figure_content)
     return True
 
+def process_python_code(python_tuple):
+    """Process a Python code block and create dataframe/metadata elements"""
+    sess = st.session_state
+    python_idx, python_item = python_tuple
+    python_content = python_item["content"]
+    python_attrs = python_item["attributes"]
+    msg_idx = len(sess.db_messages) - 1
+    
+    # Get input dataframe if specified
+    input_df = None
+    if "dataframe" in python_attrs:
+        dataframe_name = python_attrs["dataframe"]
+        dataframe_key = "dataframe_" + dataframe_name
+        if dataframe_key not in sess:
+            # More helpful error message explaining the timing
+            error_msg = (
+                f"DataFrame '{dataframe_name}' not found. If this DataFrame should come from a SQL query, "
+                "make sure to put the Python code that needs it in a separate message after the SQL has run."
+            )
+            conv_manager.add_message(role=USER_ROLE, content=f"<error>\n{error_msg}\n</error>\n")
+            return True
+        input_df = sess[dataframe_key]
+    
+    # Execute Python code
+    result = execute_python_code(input_df, python_content)
+    if result.error:
+        conv_manager.add_message(role=USER_ROLE, content=f"<error>\n{result.error}\n</error>\n")
+        return True
+    
+    # Handle output DataFrame if present
+    if result.dataframe is not None:
+        # Generate unique name for the output DataFrame
+        base_name = python_attrs.get("output_name", "python_output")
+        if base_name not in sess.table_counters:
+            sess.table_counters[base_name] = 1
+        else:
+            sess.table_counters[base_name] += 1
+        
+        dataframe_name = f"{base_name}_{sess.table_counters[base_name]}"
+        sess.latest_dataframes[base_name] = dataframe_name
+        
+        # Store DataFrame in session state
+        dataframe_key = f"dataframe_{dataframe_name}"
+        sess[dataframe_key] = result.dataframe
+        
+        # Format preview
+        preview_rows = min(5, len(result.dataframe)) if len(result.dataframe) > 20 else len(result.dataframe)
+        
+        def format_value(val):
+            if isinstance(val, float):
+                return f"{val:.4f}"
+            return str(val)
+        
+        tsv_lines = ["\t".join(result.dataframe.columns)]
+        tsv_lines.extend("\t".join(format_value(val) for val in row) for _, row in result.dataframe.iloc[:preview_rows].iterrows())
+        if preview_rows < len(result.dataframe):
+            tsv_lines.append("...")
+        
+        # Create dataframe message
+        content = f'<dataframe name="{dataframe_name}" table="{dataframe_name}" python_msg_idx="{msg_idx}" python_tag_idx="{python_idx}" >\n'
+        content += "\n".join(tsv_lines) + "\n</dataframe>\n"
+        conv_manager.add_message(role=USER_ROLE, content=content)
+    
+    # Handle metadata if present
+    if result.metadata:
+        content = "<metadata>\n"
+        for key, value in result.metadata.items():
+            content += f"{key}: {value}\n"
+        content += "</metadata>\n"
+        conv_manager.add_message(role=USER_ROLE, content=content)
+    
+    return True
+
 def generate_llm_response():
     """Generate a response from the LLM and process it"""
     sess = st.session_state
@@ -461,7 +545,8 @@ def generate_llm_response():
     msg = get_elements(response)
     sess.pending_sql = list(enumerate(msg.get("sql", [])))
     print(f"DEBUG - pending_sql: {sess.pending_sql}")
-    sess.pending_chart = list(enumerate(msg.get("chart", [])))       
+    sess.pending_chart = list(enumerate(msg.get("chart", [])))
+    sess.pending_python = list(enumerate(msg.get("python", [])))
     return True
 
 def main():
@@ -500,6 +585,11 @@ def main():
         display_message(idx, message, sess, db)
 
     # Process pending items
+    if sess.pending_python and sess.pending_python[0]:
+        python_tuple = sess.pending_python.pop(0)
+        if process_python_code(python_tuple):
+            st.rerun()
+
     if sess.pending_sql and sess.pending_sql[0]:
         sql_tuple = sess.pending_sql.pop(0)
         if process_sql_query(sql_tuple, db):
