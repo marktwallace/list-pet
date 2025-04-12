@@ -9,6 +9,7 @@ SQL guidelines:
 DuckDB does not support transactions or relational integrity constraints.
 Use bulk inserts where possible, i.e. multiple rows in the values clause.
 When creating new tables with <sql>CREATE TABLE foo ... </sql>, add a <table_description table="foo"> element after the <sql> element.
+Pay careful attention to SQL syntax rules, which are different from C and Python. SQL escapes single quotes by doubling them: '' is correct, \' is incorrect
 
 The conversation is hosted in a web browser using a Python Streamlit.
 Results of the DuckDB queries will be rendered in a streamlit dataframe.

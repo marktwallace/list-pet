@@ -156,14 +156,7 @@ def render_chart(df: pd.DataFrame, chart_code: str) -> Tuple[go.Figure, Optional
         return None, err
         
     try:
-        print("\nDEBUG - Original chart code:")
-        print(repr(chart_code))
-        
-        # dedent to prevent syntax errors
         chart_code = dedent(chart_code).strip()
-        print("\nDEBUG - After dedent:")
-        print(repr(chart_code))
-        
         # Create namespace with required imports and dataframe
         namespace = {
             "go": go,

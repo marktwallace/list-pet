@@ -1,7 +1,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict
 import typer
 import tiktoken
 from openai import OpenAI
@@ -14,6 +14,8 @@ ASSISTANT_ROLE = "assistant"
 
 ROLE_PATTERN = re.compile(r"^(System|User|Assistant):\s*$", re.IGNORECASE)
 END_EXAMPLE_LINE = "--- END EXAMPLE ---"
+
+SQL_COMPLEX_CLAUSES = ["join", "group by", "having", "order by", "limit", "offset", "union", "intersect", "except"]
 
 
 def parse_txt_file(filepath: Path, replacement_system_prompt: Optional[str] = None) -> Optional[dict]:
@@ -75,6 +77,34 @@ def parse_txt_file(filepath: Path, replacement_system_prompt: Optional[str] = No
     return {"messages": all_messages}
 
 
+def is_interesting_sql(sql: str) -> bool:
+    sql = sql.lower()
+    if any(func in sql for func in ["sum(", "avg(", "min(", "max(", "rank(", "dense_rank(", "window("]):
+        return True
+    if any(clause in sql for clause in SQL_COMPLEX_CLAUSES):
+        return True
+    if sql.count("from") > 1 or "," in re.search(r"from (.+?)", sql, re.DOTALL | re.IGNORECASE).group(1):
+        return True
+    return False
+
+
+def should_include_example(messages: List[Dict[str, str]], idx: int) -> bool:
+    if messages[-1]["role"] != ASSISTANT_ROLE:
+        return False
+
+    content = messages[-1]["content"]
+    if "<chart>" in content:
+        return True
+
+    match = re.search(r"<sql>(.*?)</sql>", content, re.DOTALL | re.IGNORECASE)
+    if match and is_interesting_sql(match.group(1)):
+        return True
+
+    # Always include last assistant message in the conversation
+    all_assistants = [m for m in messages if m["role"] == ASSISTANT_ROLE]
+    return messages[-1] == all_assistants[-1]
+
+
 @app.command()
 def prepare(
     input_dir: Path = typer.Argument(..., exists=True, file_okay=False, help="Directory with .txt files"),
@@ -87,27 +117,42 @@ def prepare(
         typer.echo("No .txt files found.")
         raise typer.Exit()
 
+    enc = tiktoken.encoding_for_model("gpt-4o")
+    total_selected = 0
     examples = []
+
     for txt_file in txt_files:
         parsed = parse_txt_file(txt_file, replacement_system_prompt=str(system_prompt) if system_prompt else None)
-        if parsed:
-            examples.append(parsed)
+        if not parsed:
+            continue
+
+        messages = parsed["messages"]
+        assistant_indices = [i for i, m in enumerate(messages) if m["role"] == ASSISTANT_ROLE]
+
+        for idx in assistant_indices:
+            example = messages[:idx + 1]
+            if should_include_example(example, idx):
+                token_count = sum(len(enc.encode(m["content"])) for m in example)
+                typer.echo(f"[✓] {txt_file.name} example #{idx + 1} (tokens: {token_count})")
+                examples.append({"messages": example})
+                total_selected += 1
+            else:
+                typer.echo(f"[ ] {txt_file.name} example #{idx + 1} (skipped)")
 
     if not examples:
         typer.echo("No valid training examples found. Exiting.")
         raise typer.Exit()
 
-    # Use directory name as default filename
     if output_file is None:
         output_file = Path(f"{input_dir.name}.jsonl")
-    
+
     output_path = input_dir / output_file
 
     with output_path.open("w", encoding="utf-8") as out:
         for example in examples:
             out.write(json.dumps(example, ensure_ascii=False) + "\n")
 
-    typer.echo(f"Wrote {len(examples)} examples to {output_path}")
+    typer.echo(f"\nWrote {total_selected} examples to {output_path}")
 
 
 @app.command()
@@ -137,13 +182,11 @@ def validate(
                 typer.echo(f"Error on line {line_num}: {e}")
                 raise typer.Exit(code=1)
 
-    # GPT-4o mini pricing (per 1M tokens)
-    TRAINING_COST_PER_1M = 3.00  # $3.00 per 1M tokens for training
-    INPUT_COST_PER_1M = 0.30     # $0.30 per 1M tokens for input
-    CACHED_INPUT_COST_PER_1M = 0.15  # $0.15 per 1M tokens for cached input
-    OUTPUT_COST_PER_1M = 1.20    # $1.20 per 1M tokens for output
+    TRAINING_COST_PER_1M = 3.00
+    INPUT_COST_PER_1M = 0.30
+    CACHED_INPUT_COST_PER_1M = 0.15
+    OUTPUT_COST_PER_1M = 1.20
 
-    # Calculate training cost
     training_cost = total_tokens / 1_000_000 * TRAINING_COST_PER_1M
     input_cost = total_tokens / 1_000_000 * INPUT_COST_PER_1M
     cached_input_cost = total_tokens / 1_000_000 * CACHED_INPUT_COST_PER_1M

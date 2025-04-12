@@ -6,6 +6,7 @@ import traceback
 import duckdb
 import streamlit as st
 import pandas as pd
+import numpy as np
 
 # Set pandas display options for better float formatting
 pd.set_option('display.float_format', lambda x: '{:.3f}'.format(x) if abs(x) < 1000 else '{:.1f}'.format(x))
@@ -100,7 +101,17 @@ def display_dataframe_item(item, idx, sess, db):
         key = "dataframe_" + dataframe_name
         if key in sess:
             df = sess[key]
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            # Format float display without modifying underlying data
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    col: st.column_config.NumberColumn(
+                        format="%.4f"
+                    ) for col in df.select_dtypes(include=['float64']).columns
+                }
+            )
             return
         
         # Validate indices
@@ -326,10 +337,16 @@ def process_sql_query(sql_tuple, db):
     dataframe_key = f"dataframe_{dataframe_name}"
     sess[dataframe_key] = df
     
-    # Format preview for display
+    # Format preview for display with consistent float precision
     preview_rows = min(5, len(df)) if len(df) > 20 else len(df)
+    
+    def format_value(val):
+        if isinstance(val, float):
+            return f"{val:.4f}"
+        return str(val)
+    
     tsv_lines = ["\t".join(df.columns)]
-    tsv_lines.extend("\t".join(str(val) for val in row) for _, row in df.iloc[:preview_rows].iterrows())
+    tsv_lines.extend("\t".join(format_value(val) for val in row) for _, row in df.iloc[:preview_rows].iterrows())
     if preview_rows < len(df):
         tsv_lines.append("...")
     
@@ -504,12 +521,14 @@ def main():
             input = "<sql>\n" + input + "\n</sql>\n"
         
         conv_manager.add_message(role=USER_ROLE, content=input)
-        sess.pending_response = True
+        
         
         # Check for SQL in input
         msg = get_elements(input)
         if msg.get("sql"):
             sess.pending_sql = list(enumerate(msg.get("sql", [])))
+        else:
+            sess.pending_response = True
             
         st.rerun()
 
