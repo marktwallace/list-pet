@@ -34,12 +34,13 @@ class LLMHandler:
                     table_info = ["No tables available yet"]
                 
                 # Add metadata section to prompt using template
-                metadata_section = self.prompts["metadata_section"].format(
-                    table_list="\n".join(table_info)
-                )
-                base_prompt += "\n\n" + metadata_section
+                #metadata_section = self.prompts["metadata_section"].format(
+                #table_list="\n".join(table_info)
+                #)
+                #base_prompt += "\n\n" + metadata_section
                 print("DEBUG - Added metadata section to prompt")
                 
+            
             except Exception as e:
                 print(f"ERROR - Failed to process table metadata: {str(e)}")
                 print(f"ERROR - Metadata processing traceback: {traceback.format_exc()}")
@@ -64,6 +65,7 @@ class LLMHandler:
     def generate_response(self):
         """Generate a response from the LLM"""
         try:
+            #llm = ChatOpenAI(model="ft:gpt-4o-mini-2024-07-18:orbital99::BJvLls4M", temperature=0.0)
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
             response = llm.invoke(self.messages)
             return response.content
@@ -81,6 +83,7 @@ class LLMHandler:
         print(f"DEBUG - Generating title from {len(user_content)} chars of content")
         
         try:
+            #llm = ChatOpenAI(model="ft:gpt-4o-mini-2024-07-18:orbital99::BJvLls4M", temperature=0.7)
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
             # Format the title prompt with the user content
             formatted_prompt = self.prompts["title"].format(user_content=user_content)

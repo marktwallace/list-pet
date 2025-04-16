@@ -19,94 +19,6 @@ The goal is to provide a working example that is:
 
 This project may serve as a foundation for experimentation with more advanced agent behaviors, memory strategies, or fine-tuned models.
 
-## Example Conversation
-
-Only the LLM completions are tagged as role `"Assistant"`; all other messages, including automatic outputs like `<dataframe>` and `<figure>`, are tagged as role `"User"`.
-
-```plaintext
-User:
-Make a grocery list
-
-Assistant:
-<reasoning>
-    We need a new grocery list table. Reasonable columns for a minimal grocery list could be item name, quantity, and category.
-</reasoning>
-<sql>
-    CREATE TABLE grocery_list (
-      item_name TEXT,
-      quantity INTEGER,
-      category TEXT);
-</sql>
-Creating a new grocery list table.
-
-User:
-Add milk, eggs, bread, jam
-
-Assistant:
-<reasoning>
-    I will insert the items into the grocery list table. I'll assume a quantity of 1 for each item and categorize them as "Dairy" for milk and eggs, "Bakery" for bread, and "Condiments" for jam.
-</reasoning>
-<sql>
-    INSERT INTO grocery_list (item_name, quantity, category) VALUES
-    ('Milk', 1, 'Dairy'),
-    ('Eggs', 1, 'Dairy'),
-    ('Bread', 1, 'Bakery'),
-    ('Jam', 1, 'Condiments');
-</sql>
-<sql>
-    SELECT * FROM grocery_list;
-</sql>
-Items added to the grocery list.
-
-User:
-<dataframe name="grocery_list_1" table="grocery_list" sql_msg_idx="4" sql_tag_idx="1" >
-item_name	quantity	category
-Milk	1	Dairy
-Eggs	1	Dairy
-Bread	1	Bakery
-Jam	1	Condiments
-</dataframe>
-
-User:
-Show a pie chart by category
-
-Assistant:
-<reasoning>
-    The user wants to visualize the distribution of grocery items across different categories using a pie chart. I will count the number of items in each category and create the pie chart with this data.
-</reasoning>
-<sql>
-    SELECT
-      category,
-      COUNT(*) as item_count
-    FROM grocery_list
-    GROUP BY category
-    ORDER BY item_count DESC;
-</sql>
-<chart dataframe="grocery_list">
-    type: pie
-    labels: category
-    values: item_count
-    title: Distribution of Grocery Items by Category
-    hole: 0.3
-</chart>
-Here's a pie chart showing the distribution of grocery items across different categories in your list.
-
-User:
-<dataframe name="grocery_list_2" table="grocery_list" sql_msg_idx="7" sql_tag_idx="0" >
-category	item_count
-Dairy	2
-Bakery	1
-Condiments	1
-</dataframe>
-
-User:
-<figure dataframe="grocery_list_2" sql_msg_idx="7" sql_tag_idx="0" chart_msg_idx="7" chart_tag_idx="0">
-Distribution of Grocery Items by Category
-</figure>
-```
-
-This example demonstrates how reasoning, SQL execution, result inspection, and visualization are cleanly separated and fully traceable in the system.
-
 ## Implementation Notes
 
 The Cursor IDE was used to develop this project. Except for an initial prototype that had to be discarded, there wasn't any "vibe coding." In fact, around 1000 lines of code were written before allowing an LLM to suggest changes. Code brevity was prioritized, and LLM-generated additions are carefully reviewed.
@@ -178,7 +90,11 @@ The app will create a local database at `db/list_pet.db`. You can delete or move
 
 Data is stored in DuckDB tables. The message history is stored in a separate `pet-meta` schema, which includes all saved conversations.
 
-**TODO:** Build CLI tools to export fine-tuning data from saved conversations.
+## Running unit tests
+```
+python -m src.chart_renderer
+python -m src.python_executor
+```
 
 ---
 
