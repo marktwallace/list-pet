@@ -10,3 +10,6 @@ pandas
 openai
 python-dotenv
 typer
+pyyaml
+minio
+pathlib

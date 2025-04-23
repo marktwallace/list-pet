@@ -1,0 +1,46 @@
+P_ALB_CR	Albumin & Creatinine - Urine	Albumin & Creatinine - Urine
+P_SSAGP	Alpha-1-Acid Glycoprotein - Serum (Surplus)	Alpha-1-Acid Glycoprotein - Serum (Surplus)
+P_UTAS	Arsenic - Total - Urine	Arsenic - Total - Urine
+P_UAS	Arsenics - Speciated - Urine	Arsenics - Speciated - Urine
+P_HDL	Cholesterol - High - Density Lipoprotein (HDL)	Cholesterol - High - Density Lipoprotein (HDL)
+P_TRIGLY	Cholesterol - Low-Density Lipoproteins (LDL) & Triglycerides	Cholesterol - Low-Density Lipoproteins (LDL) & Triglycerides
+P_TCHOL	Cholesterol - Total	Cholesterol - Total
+P_UCM	Chromium - Urine	Chromium - Urine
+P_CRCO	Chromium & Cobalt	Chromium & Cobalt
+P_CBC	Complete Blood Count with 5-Part Differential in Whole Blood	Complete Blood Count with 5-Part Differential in Whole Blood
+P_COT	Cotinine and Hydroxycotinine - Serum	Cotinine and Hydroxycotinine - Serum
+P_CMV	Cytomegalovirus IgG & IgM Antibodies - Serum	Cytomegalovirus IgG & IgM Antibodies - Serum
+P_ETHOX	Ethylene Oxide	Ethylene Oxide
+P_FASTQX	Fasting Questionnaire	Fasting Questionnaire
+P_FERTIN	Ferritin	Ferritin
+P_FR	Flame Retardants - Urine	Flame Retardants - Urine
+P_SSFR	Flame Retardants - Urine (Surplus)	Flame Retardants - Urine (Surplus)
+P_FOLATE	Folate - RBC	Folate - RBC
+P_FOLFMS	Folate Forms - Total & Individual - Serum	Folate Forms - Total & Individual - Serum
+P_GHB	Glycohemoglobin	Glycohemoglobin
+P_HEPA	Hepatitis A	Hepatitis A
+P_HEPB_S	Hepatitis B Surface Antibody	Hepatitis B Surface Antibody
+P_HEPBD	Hepatitis B: Core antibody, Surface antigen, and Hepatitis D antibody	Hepatitis B: Core antibody, Surface antigen, and Hepatitis D antibody
+P_HEPC	Hepatitis C: RNA (HCV-RNA), Confirmed Antibody (INNO-LIA), & Genotype	Hepatitis C: RNA (HCV-RNA), Confirmed Antibody (INNO-LIA), & Genotype
+P_HEPE	Hepatitis E: IgG & IgM Antibodies	Hepatitis E: IgG & IgM Antibodies
+P_HSCRP	High-Sensitivity C-Reactive Protein	High-Sensitivity C-Reactive Protein
+P_IHGEM	Inorganic, Ethyl and Methyl - Blood	Inorganic, Ethyl and Methyl - Blood
+P_INS	Insulin	Insulin
+P_UIO	Iodine - Urine	Iodine - Urine
+P_FETIB	Iron Status - Serum	Iron Status - Serum
+P_PBCD	Lead, Cadmium, Total Mercury, Selenium, & Manganese - Blood	Lead, Cadmium, Total Mercury, Selenium, & Manganese - Blood
+P_UHG	Mercury: Inorganic - Urine	Mercury: Inorganic - Urine
+P_UM	Metals - Urine	Metals - Urine
+P_UNI	Nickel - Urine	Nickel - Urine
+P_OPD	Organophosphate Insecticides - Dialkyl Phosphate Metabolites - Urine	Organophosphate Insecticides - Dialkyl Phosphate Metabolites - Urine
+P_PERNT	Perchlorate, Nitrate & Thiocyanate - Urine	Perchlorate, Nitrate & Thiocyanate - Urine
+P_PFAS	Perfluoroalkyl and Polyfluoroalkyl Substances	Perfluoroalkyl and Polyfluoroalkyl Substances
+P_GLU	Plasma Fasting Glucose	Plasma Fasting Glucose
+P_TST	Sex Steroid Hormone Panel - Serum	Sex Steroid Hormone Panel - Serum
+P_BIOPRO	Standard Biochemistry Profile	Standard Biochemistry Profile
+P_TFR	Transferrin Receptor	Transferrin Receptor
+P_UCFLOW	Urine Flow Rate	Urine Flow Rate
+P_UCPREG	Urine Pregnancy Test	Urine Pregnancy Test
+P_UVOC	Volatile Organic Compound (VOC) Metabolites - Urine	Volatile Organic Compound (VOC) Metabolites - Urine
+P_UVOC2	Volatile Organic Compound (VOC) Metabolites II - Urine	Volatile Organic Compound (VOC) Metabolites II - Urine
+P_VOCWB	Volatile Organic Compounds and Trihalomethanes/MTBE - Blood	Volatile Organic Compounds and Trihalomethanes/MTBE - Blood

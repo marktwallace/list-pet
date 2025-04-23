@@ -1,0 +1,11 @@
+P_AUX	Audiometry	Contains data from the audiometry component.
+P_AUXAR	Audiometry - Acoustic Reflex	Contains data from the audiometry acoustic reflex test component.
+P_AUXTYM	Audiometry - Tympanometry	Contains data from the audiometry tympanometry test component.
+P_AUXWBR	Audiometry - Wideband Reflectance	Contains data from the audiometry wideband reflectance test component.
+P_BPXO	Blood Pressure - Oscillometric Measurement	Contains oscillometric blood pressure measurements.
+P_BMX	Body Measures	Contains data from the body measures component.
+P_DXXFEM	Dual-Energy X-ray Absorptiometry - Femur	Contains femur BMD and BMC data from the dual-energy x-ray absorptiometry (DXA) scans.
+P_DXXSPN	Dual-Energy X-ray Absorptiometry - Spine	Contains spine BMD and BMC data from the dual-energy x-ray absorptiometry (DXA) scans.
+P_LUX	Liver Ultrasound Transient Elastography	Contains data on liver stiffness and controlled attenuation parameter (CAP) from the liver ultrasound transient elastography (LUTE) examination.
+P_OHXDEN	Oral Health - Dentition	Contains data from the oral health dentition assessment.
+P_OHXREF	Oral Health - Recommendation of Care	Contains data on recommendations of care from the oral health examination.

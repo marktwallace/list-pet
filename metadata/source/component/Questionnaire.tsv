@@ -1,0 +1,39 @@
+P_ACQ	Acculturation	Acculturation
+P_ALQ	Alcohol Use	Alcohol Use
+P_AUQ	Audiometry	Audiometry
+P_BPQ	Blood Pressure & Cholesterol	Blood Pressure & Cholesterol
+P_CDQ	Cardiovascular Health	Cardiovascular Health
+P_CBQPFA	Consumer Behavior Phone Follow-up Module - Adult	Consumer Behavior Phone Follow-up Module - Adult
+P_CBQPFC	Consumer Behavior Phone Follow-up Module – Child	Consumer Behavior Phone Follow-up Module – Child
+P_HSQ	Current Health Status	Current Health Status
+P_DEQ	Dermatology	Dermatology
+P_DIQ	Diabetes	Diabetes
+P_DBQ	Diet Behavior & Nutrition	Diet Behavior & Nutrition
+P_ECQ	Early Childhood	Early Childhood
+P_FSQ	Food Security	Food Security
+P_HIQ	Health Insurance	Health Insurance
+P_HEQ	Hepatitis	Hepatitis
+P_HUQ	Hospital Utilization & Access to Care	Hospital Utilization & Access to Care
+P_IMQ	Immunization	Immunization
+P_INQ	Income	Income
+P_KIQ_U	Kidney Conditions - Urology	Kidney Conditions - Urology
+P_MCQ	Medical Conditions	Medical Conditions
+P_DPQ	Mental Health - Depression Screener	Mental Health - Depression Screener
+P_OCQ	Occupation	Occupation
+P_OHQ	Oral Health	Oral Health
+P_OSQ	Osteoporosis	Osteoporosis
+P_PUQMEC	Pesticide Use	Pesticide Use
+P_PAQ	Physical Activity	Physical Activity
+P_PAQY	Physical Activity - Youth	Physical Activity - Youth
+P_RXQ_RX	Prescription Medications	Prescription Medications
+RXQ_DRUG	Prescription Medications - Drug Information	Prescription Medications - Drug Information
+P_RXQASA	Preventive Aspirin Use	Preventive Aspirin Use
+P_RHQ	Reproductive Health	Reproductive Health
+P_SLQ	Sleep Disorders	Sleep Disorders
+P_SMQ	Smoking - Cigarette Use	Smoking - Cigarette Use
+P_SMQFAM	Smoking - Household Smokers	Smoking - Household Smokers
+P_SMQRTU	Smoking - Recent Tobacco Use	Smoking - Recent Tobacco Use
+P_SMQSHS	Smoking - Secondhand Smoke Exposure	Smoking - Secondhand Smoke Exposure
+P_VTQ	Volatile Toxicant	Volatile Toxicant
+P_WHQ	Weight History	Weight History
+P_WHQMEC	Weight History - Youth	Weight History - Youth
