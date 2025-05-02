@@ -81,7 +81,7 @@ def update_dataframe_mapping(sess, sql: str, dataframe_key: str) -> str:
 def handle_regenerate_button(button_key, sql, db, dataframe_key):
     """Handle regeneration button for dataframes and figures"""
     if st.button("🔍 Regenerate", key=button_key, type="secondary", use_container_width=False):
-        df, err = db.execute_query(sql)
+        df, err = db.execute_query(sql, db_type="postgres")
         if err:
             print(f"ERROR - {err} for regeneration while rerunning SQL: {sql}")
             return False
@@ -330,7 +330,7 @@ def process_sql_query(sql_tuple, db):
     
     # Execute query and handle errors
     print(f"DEBUG - Executing SQL query with msg_idx={msg_idx}, sql_idx={sql_idx}")
-    df, err = db.execute_query(sql, description=description)
+    df, err = db.execute_query(sql, description=description, db_type="postgres")
     if err:
         print(f"DEBUG - SQL execution error: {err}")
         conv_manager.add_message(role=USER_ROLE, content=f"<error>\n{err}\n</error>\n")

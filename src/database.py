@@ -4,10 +4,22 @@ import pandas as pd
 import traceback
 from datetime import datetime
 import re
+import os
+import psycopg2
 
 class Database:
     def __init__(self):
         self.conn = st.session_state.get("conn")
+        # Initialize Postgres connection if env var is set
+        self.pg_conn = None
+        pg_conn_str = os.environ.get("POSTGRES_CONN_STR")
+        if pg_conn_str:
+            try:
+                self.pg_conn = psycopg2.connect(pg_conn_str)
+                print("DEBUG - Connected to Postgres")
+            except Exception as e:
+                print(f"ERROR - Failed to connect to Postgres: {str(e)}")
+                self.pg_conn = None
     
     def initialize_pet_meta_schema(self):
         """Initialize pet_meta schema and tables if they don't exist"""
@@ -255,10 +267,33 @@ class Database:
             
     CREATE_TABLE_REGEX = r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+(?:\.\w+)?)"
     
-    def execute_query(self, sql: str, params=None, description: str = None) -> tuple[pd.DataFrame | None, str | None]:
-        """Execute SQL and return (dataframe, error_message)"""
+    def execute_query(self, sql: str, params=None, description: str = None, db_type: str = "duckdb") -> tuple[pd.DataFrame | None, str | None]:
+        """Execute SQL and return (dataframe, error_message). db_type can be 'duckdb' or 'postgres'."""
         try:
-            print(f"DEBUG - Database executing SQL: {sql[:100]}...")
+            print(f"DEBUG - Database executing SQL: {sql[:100]}... (db_type={db_type})")
+            if db_type == "postgres":
+                if not self.pg_conn:
+                    error_msg = "Postgres connection not available. Set POSTGRES_CONN_STR env var."
+                    print(f"ERROR - {error_msg}")
+                    return None, error_msg
+                try:
+                    # Use pandas to get DataFrame for SELECT queries
+                    if sql.strip().upper().startswith(("SELECT", "SHOW", "DESCRIBE")) or "RETURNING" in sql.upper():
+                        df = pd.read_sql_query(sql, self.pg_conn, params=params)
+                        print(f"DEBUG - Postgres query returned dataframe with {len(df)} rows and {len(df.columns)} columns")
+                        return df, None
+                    else:
+                        # Non-SELECT queries
+                        with self.pg_conn.cursor() as cur:
+                            cur.execute(sql, params)
+                            self.pg_conn.commit()
+                        return None, None
+                except Exception as e:
+                    error_msg = f"Postgres SQL Error: {str(e)}"
+                    print(f"ERROR - {error_msg}")
+                    print(f"ERROR - Postgres SQL execution traceback: {traceback.format_exc()}")
+                    return None, error_msg
+            # Default: DuckDB logic
             # Check if this is a CREATE TABLE statement
             create_table_name = None
             match = re.search(self.CREATE_TABLE_REGEX, sql, re.IGNORECASE)
