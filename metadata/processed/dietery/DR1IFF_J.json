@@ -1,0 +1,535 @@
+{
+  "description": "Detailed dietary intake data from NHANES 2017-2018 participants for the first day (in-person) 24-hour dietary recall, including foods and beverages consumed, amounts, nutrient content, and related variables.",
+  "collection_method": "Data collected via in-person 24-hour dietary recall interview using USDA's Automated Multiple Pass Method (AMPM) in a Mobile Examination Center (MEC), with proxy assistance for young children and interviews conducted mostly in English and Spanish.",
+  "key_variables": {
+    "SEQN": {
+      "description": "Respondent sequence number, unique identifier for each participant",
+      "type": "numeric"
+    },
+    "WTDRD1": {
+      "description": "Dietary day one sample weight for analysis",
+      "type": "numeric",
+      "units": "person-level weight"
+    },
+    "DR1ILINE": {
+      "description": "Food/Individual component number, unique within participant",
+      "type": "numeric"
+    },
+    "DR1DRSTZ": {
+      "description": "Dietary recall status indicating quality and completeness of recall",
+      "type": "categorical",
+      "categories": {
+        "1": "Reliable and met minimum criteria",
+        "2": "Not reliable or did not meet minimum criteria",
+        "4": "Reported consuming breast milk",
+        "5": "Not done"
+      }
+    },
+    "DR1EXMER": {
+      "description": "Interviewer ID code",
+      "type": "numeric"
+    },
+    "DRABF": {
+      "description": "Indicates if participant was breast-fed infant on either recall day",
+      "type": "categorical",
+      "categories": {
+        "1": "Yes",
+        "2": "No"
+      }
+    },
+    "DRDINT": {
+      "description": "Number of days of intake collected from participant",
+      "type": "categorical",
+      "categories": {
+        "1": "Day 1 only",
+        "2": "Day 1 and Day 2"
+      }
+    },
+    "DR1DBIH": {
+      "description": "Number of days between intake day and household family interview",
+      "type": "numeric",
+      "units": "days"
+    },
+    "DR1DAY": {
+      "description": "Intake day of the week",
+      "type": "categorical",
+      "categories": {
+        "1": "Sunday",
+        "2": "Monday",
+        "3": "Tuesday",
+        "4": "Wednesday",
+        "5": "Thursday",
+        "6": "Friday",
+        "7": "Saturday"
+      }
+    },
+    "DR1LANG": {
+      "description": "Language respondent used mostly during interview",
+      "type": "categorical",
+      "categories": {
+        "1": "English",
+        "2": "Spanish",
+        "3": "English and Spanish",
+        "4": "Other",
+        "5": "Asian Languages",
+        "6": "Asian Languages and English"
+      }
+    },
+    "DR1CCMNM": {
+      "description": "Combination food number, sequential number within combination type",
+      "type": "numeric"
+    },
+    "DR1CCMTX": {
+      "description": "Combination food type indicating if food/beverage was consumed in combination",
+      "type": "categorical",
+      "categories": {
+        "0": "Non-combination food",
+        "1": "Beverage with additions",
+        "2": "Cereal with additions",
+        "3": "Bread/baked products with additions",
+        "4": "Salad",
+        "5": "Sandwiches",
+        "6": "Soup",
+        "7": "Frozen meals",
+        "8": "Ice cream/frozen yogurt with additions",
+        "9": "Dried beans and vegetable with additions",
+        "10": "Fruit with additions",
+        "11": "Tortilla products",
+        "12": "Meat, poultry, fish with additions",
+        "13": "Lunchables\u00ae",
+        "14": "Chips with additions",
+        "90": "Other mixtures"
+      }
+    },
+    "DR1_020": {
+      "description": "Time of eating occasion",
+      "type": "string",
+      "units": "HH:MM (24-hour format)"
+    },
+    "DR1_030Z": {
+      "description": "Name of eating occasion",
+      "type": "categorical",
+      "categories": {
+        "1": "Breakfast",
+        "2": "Lunch",
+        "3": "Dinner",
+        "4": "Supper",
+        "5": "Brunch",
+        "6": "Snack",
+        "7": "Drink",
+        "8": "Infant feeding",
+        "9": "Extended consumption",
+        "10": "Desayuno",
+        "11": "Almuerzo",
+        "12": "Comida",
+        "13": "Merienda",
+        "14": "Cena",
+        "15": "Entre comida",
+        "16": "Botana",
+        "17": "Bocadillo",
+        "18": "Tentempie",
+        "19": "Bebida",
+        "91": "Other",
+        "99": "Don't know"
+      }
+    },
+    "DR1FS": {
+      "description": "Source of food/beverage",
+      "type": "categorical",
+      "categories": {
+        "1": "Store grocery/supermarket",
+        "2": "Restaurant with waiter/waitress",
+        "3": "Restaurant fast food/Pizza",
+        "4": "Bar/Tavern/Lounge",
+        "5": "Restaurant no additional information",
+        "6": "Cafeteria NOT in a K-12 school",
+        "7": "Cafeteria in a K-12 school",
+        "8": "Child/Adult care center",
+        "9": "Child/Adult home care",
+        "10": "Soup kitchen/shelter/food pantry",
+        "11": "Meals on Wheels Program",
+        "12": "Community food program \u2013 other",
+        "13": "Community program no additional info",
+        "14": "Vending machine",
+        "15": "Common coffee pot or snack tray",
+        "16": "From someone else/gift",
+        "17": "Mail order purchase",
+        "18": "Residential dining facility",
+        "19": "Grown or caught by you or someone you know",
+        "20": "Fish caught by you or someone you know",
+        "24": "Sport, recreation, or entertainment",
+        "25": "Street vendor, vending truck",
+        "26": "Fundraiser sales",
+        "27": "Store - convenience type",
+        "28": "Store - no additional information",
+        "91": "Other, specify",
+        "99": "Don't know"
+      }
+    },
+    "DR1_040Z": {
+      "description": "Did you eat this meal at home?",
+      "type": "categorical",
+      "categories": {
+        "1": "Yes",
+        "2": "No",
+        "7": "Refused",
+        "9": "Don't know"
+      }
+    },
+    "DR1IFDCD": {
+      "description": "USDA food code identifying the food/beverage",
+      "type": "numeric"
+    },
+    "DR1IGRMS": {
+      "description": "Amount of food/beverage consumed",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IKCAL": {
+      "description": "Energy from food/beverage",
+      "type": "numeric",
+      "units": "kilocalories"
+    },
+    "DR1IPROT": {
+      "description": "Protein content",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1ICARB": {
+      "description": "Carbohydrate content",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1ISUGR": {
+      "description": "Total sugars",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IFIBE": {
+      "description": "Dietary fiber",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1ITFAT": {
+      "description": "Total fat",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1ISFAT": {
+      "description": "Total saturated fatty acids",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IMFAT": {
+      "description": "Total monounsaturated fatty acids",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IPFAT": {
+      "description": "Total polyunsaturated fatty acids",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1ICHOL": {
+      "description": "Cholesterol",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IATOC": {
+      "description": "Vitamin E as alpha-tocopherol",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IATOA": {
+      "description": "Added alpha-tocopherol (Vitamin E)",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IRET": {
+      "description": "Retinol",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IVARA": {
+      "description": "Vitamin A, retinol activity equivalents (RAE)",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IACAR": {
+      "description": "Alpha-carotene",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IBCAR": {
+      "description": "Beta-carotene",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1ICRYP": {
+      "description": "Beta-cryptoxanthin",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1ILYCO": {
+      "description": "Lycopene",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1ILZ": {
+      "description": "Lutein + zeaxanthin",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IVB1": {
+      "description": "Thiamin (Vitamin B1)",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IVB2": {
+      "description": "Riboflavin (Vitamin B2)",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1INIAC": {
+      "description": "Niacin",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IVB6": {
+      "description": "Vitamin B6",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IFOLA": {
+      "description": "Total folate",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IFA": {
+      "description": "Folic acid",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IFF": {
+      "description": "Food folate",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IFDFE": {
+      "description": "Folate, dietary folate equivalents (DFE)",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1ICHL": {
+      "description": "Total choline",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IVB12": {
+      "description": "Vitamin B12",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IB12A": {
+      "description": "Added vitamin B12",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IVC": {
+      "description": "Vitamin C",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IVD": {
+      "description": "Vitamin D (D2 + D3)",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1IVK": {
+      "description": "Vitamin K",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1ICALC": {
+      "description": "Calcium",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IPHOS": {
+      "description": "Phosphorus",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IMAGN": {
+      "description": "Magnesium",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IIRON": {
+      "description": "Iron",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IZINC": {
+      "description": "Zinc",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1ICOPP": {
+      "description": "Copper",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1ISODI": {
+      "description": "Sodium",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IPOTA": {
+      "description": "Potassium",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1ISELE": {
+      "description": "Selenium",
+      "type": "numeric",
+      "units": "micrograms"
+    },
+    "DR1ICAFF": {
+      "description": "Caffeine",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1ITHEO": {
+      "description": "Theobromine",
+      "type": "numeric",
+      "units": "milligrams"
+    },
+    "DR1IALCO": {
+      "description": "Alcohol",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IMOIS": {
+      "description": "Moisture (water content)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IS040": {
+      "description": "Saturated fatty acid 4:0 (Butanoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IS060": {
+      "description": "Saturated fatty acid 6:0 (Hexanoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IS080": {
+      "description": "Saturated fatty acid 8:0 (Octanoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IS100": {
+      "description": "Saturated fatty acid 10:0 (Decanoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IS120": {
+      "description": "Saturated fatty acid 12:0 (Dodecanoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IS140": {
+      "description": "Saturated fatty acid 14:0 (Tetradecanoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IS160": {
+      "description": "Saturated fatty acid 16:0 (Hexadecanoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IS180": {
+      "description": "Saturated fatty acid 18:0 (Octadecanoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IM161": {
+      "description": "Monounsaturated fatty acid 16:1 (Hexadecenoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IM181": {
+      "description": "Monounsaturated fatty acid 18:1 (Octadecenoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IM201": {
+      "description": "Monounsaturated fatty acid 20:1 (Eicosenoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IM221": {
+      "description": "Monounsaturated fatty acid 22:1 (Docosenoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IP182": {
+      "description": "Polyunsaturated fatty acid 18:2 (Octadecadienoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IP183": {
+      "description": "Polyunsaturated fatty acid 18:3 (Octadecatrienoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IP184": {
+      "description": "Polyunsaturated fatty acid 18:4 (Octadecatetraenoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IP204": {
+      "description": "Polyunsaturated fatty acid 20:4 (Eicosatetraenoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IP205": {
+      "description": "Polyunsaturated fatty acid 20:5 (Eicosapentaenoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IP225": {
+      "description": "Polyunsaturated fatty acid 22:5 (Docosapentaenoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    },
+    "DR1IP226": {
+      "description": "Polyunsaturated fatty acid 22:6 (Docosahexaenoic acid)",
+      "type": "numeric",
+      "units": "grams"
+    }
+  },
+  "notes": [
+    "Data reflect only nutrients from foods, beverages, and water; dietary supplements and medications are excluded.",
+    "Dietary recall status codes 1 and 4 appear in Individual Foods files; code 4 indicates breast milk consumption with missing quantity data.",
+    "Sample weights WTDRD1 and WTDR2D should be used for analyses of Day 1 only and Day 1 plus Day 2 dietary data respectively.",
+    "Combination food types identify foods/beverages consumed together; about 42% of items are combinations.",
+    "Eating occasion names are respondent-designated and not strictly defined.",
+    "Proxy respondents assisted for children under 12 years; interviews conducted mostly in English and Spanish with translators as needed.",
+    "Missing values are indicated by zero counts or explicit missing codes; some variables have missing values for breast milk records.",
+    "The Automated Multiple Pass Method (AMPM) was used for dietary data collection and has been validated for accuracy."
+  ],
+  "codebook_summary": {
+    "total_variables": 90,
+    "sample_size": 7641,
+    "missing_codes": [
+      "0",
+      "7",
+      "9",
+      "99",
+      "."
+    ]
+  }
+}

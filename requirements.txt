@@ -13,3 +13,4 @@ typer
 pyyaml
 minio
 pathlib
+beautifulsoup4

@@ -1,0 +1,16 @@
+{
+  "DR1IFF_J": "Dietary Interview - Individual Foods, First Day",
+  "DR2IFF_J": "Dietary Interview - Individual Foods, Second Day", 
+  "DR1TOT_J": "Dietary Interview - Total Nutrient Intakes, First Day",
+  "DR2TOT_J": "Dietary Interview - Total Nutrient Intakes, Second Day",
+  "DRXFCD_J": "Dietary Interview Technical Support File - Food Codes",
+  "DSBI": "Dietary Supplement Database - Blend Information",
+  "DSII": "Dietary Supplement Database - Ingredient Information", 
+  "DSPI": "Dietary Supplement Database - Product Information",
+  "DS1IDS_J": "Dietary Supplement Use 24-Hour - Individual Dietary Supplements, First Day",
+  "DS2IDS_J": "Dietary Supplement Use 24-Hour - Individual Dietary Supplements, Second Day",
+  "DS1TOT_J": "Dietary Supplement Use 24-Hour - Total Dietary Supplements, First Day",
+  "DS2TOT_J": "Dietary Supplement Use 24-Hour - Total Dietary Supplements, Second Day",
+  "DSQIDS_J": "Dietary Supplement Use 30-Day - Individual Dietary Supplements",
+  "DSQTOT_J": "Dietary Supplement Use 30-Day - Total Dietary Supplements"
+}

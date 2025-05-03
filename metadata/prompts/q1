@@ -1,0 +1,3 @@
+I have a question about the .tsv data. The format is filename, title, description
+
+The title and description are pretty similar. Given your understanding of the NHANES data, do you need both the title and description to reason about how to use the data, or is one or the other adequate by itself?

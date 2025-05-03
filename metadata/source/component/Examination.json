@@ -1,0 +1,13 @@
+{
+  "P_AUX": "Audiometry",
+  "P_AUXAR": "Audiometry - Acoustic Reflex",
+  "P_AUXTYM": "Audiometry - Tympanometry", 
+  "P_AUXWBR": "Audiometry - Wideband Reflectance",
+  "P_BPXO": "Blood Pressure - Oscillometric Measurement",
+  "P_BMX": "Body Measures",
+  "P_DXXFEM": "Dual-Energy X-ray Absorptiometry - Femur",
+  "P_DXXSPN": "Dual-Energy X-ray Absorptiometry - Spine",
+  "P_LUX": "Liver Ultrasound Transient Elastography",
+  "P_OHXDEN": "Oral Health - Dentition",
+  "P_OHXREF": "Oral Health - Recommendation of Care"
+}
