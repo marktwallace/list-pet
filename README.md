@@ -53,7 +53,7 @@ Clone the repo:
 
 ```bash
 git clone <repo_url>
-cd ut-r1-langchain
+cd list-pet
 ```
 
 Create and activate the virtual environment:
