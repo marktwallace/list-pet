@@ -2,11 +2,13 @@ from datetime import datetime
 import os
 import re
 import traceback
+import sys
 
 import duckdb
 import streamlit as st
 import pandas as pd
 import numpy as np
+from dotenv import load_dotenv
 
 # Set pandas display options for better float formatting
 pd.set_option('display.float_format', lambda x: '{:.3f}'.format(x) if abs(x) < 1000 else '{:.1f}'.format(x))
@@ -552,16 +554,56 @@ def generate_llm_response():
 def main():
     st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
     
+    sess = st.session_state # Get session state early
+
+    # Determine config_base_path from LISTPET_BASE environment variable or default
+    if 'config_base_path' not in sess:
+        config_base_env_var = os.environ.get("LISTPET_BASE")
+        if config_base_env_var:
+            sess.config_base_path = os.path.abspath(os.path.expanduser(config_base_env_var))
+            print(f"DEBUG - Using LISTPET_BASE: {sess.config_base_path}")
+        else:
+            sess.config_base_path = os.path.abspath(".") # Default to project root
+            print(f"DEBUG - LISTPET_BASE not set, defaulting to project root: {sess.config_base_path}")
+
+    # Load environment variables from .env file at the config_base_path
+    dotenv_path = os.path.join(sess.config_base_path, ".env")
+    if os.path.exists(dotenv_path):
+        load_dotenv(dotenv_path=dotenv_path)
+        print(f"DEBUG - Loaded environment variables from: {dotenv_path}")
+    else:
+        print(f"DEBUG - .env file not found at: {dotenv_path}")
+    
     # Add CSS styles
     st.markdown(CODE_WRAP_STYLE, unsafe_allow_html=True)
     st.markdown(CONVERSATION_BUTTON_STYLE, unsafe_allow_html=True)
     
     global conv_manager
     
-    # Initialize database and session state
-    sess = st.session_state
+    # Initialize database and session state (sess was already obtained)
+    # sess = st.session_state # No need to get it again
+
+    # Determine and store effective app mode based on POSTGRES_CONN_STR
+    if 'effective_app_mode' not in sess:
+        if os.environ.get("POSTGRES_CONN_STR"):
+            sess.effective_app_mode = "postgres_enabled"
+        else:
+            sess.effective_app_mode = "duckdb_only"
+        print(f"DEBUG - Effective Application Mode set to: {sess.effective_app_mode}")
+
+    # The old app_mode logic is removed:
+    # if "app_mode" not in sess:
+    #     sess.app_mode = os.environ.get("APP_MODE", "generic")
+    #     print(f"DEBUG - Application Mode set to: {sess.app_mode}")
+
     if "conn" not in sess:  # app restart - create new session
-        sess.conn = duckdb.connect('db/list_pet.db')
+        # Determine the path for the DuckDB database file using config_base_path
+        db_directory = os.path.join(sess.config_base_path, "db")
+        os.makedirs(db_directory, exist_ok=True)
+        db_file_path = os.path.join(db_directory, "list_pet.db")
+        print(f"DEBUG - DuckDB database path set to: {db_file_path}")
+        
+        sess.conn = duckdb.connect(db_file_path)
         db = Database()
         db.initialize_pet_meta_schema()
         conv_manager = ConversationManager(db)

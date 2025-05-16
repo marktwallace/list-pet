@@ -179,3 +179,5 @@ dumps/
 logs/
 training/
 playbooks/
+
+adapter/karius/

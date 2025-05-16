@@ -4,10 +4,25 @@ import pandas as pd
 import traceback
 from datetime import datetime
 import re
+import os
+import psycopg2
 
 class Database:
     def __init__(self):
         self.conn = st.session_state.get("conn")
+        self.postgres_conn = None
+
+        # Connect to PostgreSQL if POSTGRES_CONN_STR is set (after .env load)
+        postgres_conn_str = os.environ.get("POSTGRES_CONN_STR")
+        if postgres_conn_str:
+            try:
+                self.postgres_conn = psycopg2.connect(postgres_conn_str)
+                print("DEBUG - Successfully connected to PostgreSQL.")
+            except Exception as e:
+                error_msg = f"Failed to connect to PostgreSQL: {str(e)}"
+                print(f"ERROR - {error_msg}")
+        else:
+            print("DEBUG - POSTGRES_CONN_STR not set, PostgreSQL connection not attempted.")
     
     def initialize_pet_meta_schema(self):
         """Initialize pet_meta schema and tables if they don't exist"""
@@ -255,70 +270,120 @@ class Database:
             
     CREATE_TABLE_REGEX = r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+(?:\.\w+)?)"
     
-    def execute_query(self, sql: str, params=None, description: str = None) -> tuple[pd.DataFrame | None, str | None]:
-        """Execute SQL and return (dataframe, error_message)"""
+    def execute_query(self, sql: str, params=None, description: str = None, target_db: str = "default") -> tuple[pd.DataFrame | None, str | None]:
+        """Execute SQL and return (dataframe, error_message)
+        Routes to DuckDB or PostgreSQL based on POSTGRES_CONN_STR or target_db.
+        """
+        actual_target_db = target_db
+        if target_db == "default":
+            if self.postgres_conn: # If PostgreSQL connection exists, default to it
+                actual_target_db = "postgres"
+            else:
+                actual_target_db = "duckdb"
+        
+        print(f"DEBUG - Routing query to: {actual_target_db}. Original target: {target_db}, Postgres available: {bool(self.postgres_conn)}")
+
+        if actual_target_db == "duckdb":
+            return self._execute_duckdb_query(sql, params, description)
+        elif actual_target_db == "postgres":
+            if not self.postgres_conn:
+                return None, "PostgreSQL connection not available."
+            # The 'description' parameter is primarily for DuckDB table creation logging in pet_meta
+            return self._execute_postgres_query(sql, params)
+        else:
+            return None, f"Unsupported target database: {actual_target_db}"
+
+    def _execute_duckdb_query(self, sql: str, params=None, description: str = None) -> tuple[pd.DataFrame | None, str | None]:
+        """Execute SQL against DuckDB and return (dataframe, error_message)"""
         try:
-            print(f"DEBUG - Database executing SQL: {sql[:100]}...")
-            # Check if this is a CREATE TABLE statement
+            print(f"DEBUG - Database (DuckDB) executing SQL: {sql[:100]}...")
             create_table_name = None
             match = re.search(self.CREATE_TABLE_REGEX, sql, re.IGNORECASE)
             if match:
                 create_table_name = match.group(1)
-                print(f"DEBUG - Detected CREATE TABLE for: {create_table_name}")
+                print(f"DEBUG - Detected CREATE TABLE for: {create_table_name} (DuckDB)")
             
-            # Execute the query
             try:
                 if params is not None:
-                    print(f"DEBUG - Executing with params: {params}")
+                    print(f"DEBUG - Executing with params: {params} (DuckDB)")
                     result = self.conn.execute(sql, params)
                 else:
                     result = self.conn.execute(sql)
-                print("DEBUG - SQL execution successful")
+                print("DEBUG - SQL execution successful (DuckDB)")
             except Exception as e:
-                error_msg = f"SQL Error: {str(e)}"
+                error_msg = f"SQL Error (DuckDB): {str(e)}"
                 print(f"ERROR - {error_msg}")
-                print(f"ERROR - SQL execution traceback: {traceback.format_exc()}")
+                print(f"ERROR - SQL execution traceback (DuckDB): {traceback.format_exc()}")
                 return None, error_msg
             
-            # If it's a SELECT, SHOW, DESCRIBE or RETURNING statement, return the dataframe
             if sql.strip().upper().startswith(("SELECT", "SHOW", "DESCRIBE")) or "RETURNING" in sql.upper():
                 try:
                     df = result.df()
-                    print(f"DEBUG - Query returned dataframe with {len(df)} rows and {len(df.columns)} columns")
+                    print(f"DEBUG - Query returned dataframe with {len(df)} rows and {len(df.columns)} columns (DuckDB)")
                     return df, None
                 except Exception as e:
-                    error_msg = f"Error displaying results: {str(e)}"
+                    error_msg = f"Error displaying results (DuckDB): {str(e)}"
                     print(f"ERROR - {error_msg}")
-                    print(f"ERROR - Result display traceback: {traceback.format_exc()}")
+                    print(f"ERROR - Result display traceback (DuckDB): {traceback.format_exc()}")
                     return None, error_msg
             else:
-                # For non-SELECT statements
-                # Special case for CREATE TABLE to log metadata
                 if create_table_name and not create_table_name.startswith("pet_meta."):
-                    print(f"DEBUG - Logging creation of table: {create_table_name}")
+                    print(f"DEBUG - Logging creation of table: {create_table_name} (DuckDB)")
                     self.log_table_creation(create_table_name, description or "")
-                
-                # For all successful non-SELECT operations, return None for the error message
                 return None, None
                 
         except Exception as e:
-            error_msg = f"SQL Error: {str(e)}"
+            error_msg = f"SQL Error (DuckDB): {str(e)}"
             print(f"ERROR - {error_msg}")
-            print(f"ERROR - SQL execution traceback: {traceback.format_exc()}")
-            
-            # Provide more specific guidance based on the error type
+            print(f"ERROR - SQL execution traceback (DuckDB): {traceback.format_exc()}")
             if "no such table" in str(e).lower():
-                error_msg += """               
-                    The table you're trying to query doesn't exist. 
-                    Use SHOW TABLES to see available tables or 
-                    CREATE TABLE to create a new one.
-                """
+                error_msg += "\n The table you\'re trying to query doesn\'t exist in DuckDB. Use SHOW TABLES to see available tables or CREATE TABLE to create a new one."
             elif "not found" in str(e).lower() and "column" in str(e).lower():
-                error_msg += """
-                    One or more columns in your query don't exist in the table. 
-                    Use DESCRIBE [table_name] to see available columns.
-                """
-            
+                error_msg += "\n One or more columns in your query don\'t exist in the DuckDB table. Use DESCRIBE [table_name] to see available columns."
+            return None, error_msg
+
+    def _execute_postgres_query(self, sql: str, params=None) -> tuple[pd.DataFrame | None, str | None]:
+        """Execute SQL against PostgreSQL and return (dataframe, error_message)"""
+        try:
+            print(f"DEBUG - Database (PostgreSQL) executing SQL: {sql[:100]}...")
+            with self.postgres_conn.cursor() as cur:
+                if params is not None:
+                    print(f"DEBUG - Executing with params: {params} (PostgreSQL)")
+                    cur.execute(sql, params)
+                else:
+                    cur.execute(sql)
+                
+                # Commit DML/DDL statements if not a SELECT
+                if not sql.strip().upper().startswith("SELECT") and not "RETURNING" in sql.upper():
+                    self.postgres_conn.commit()
+                    print("DEBUG - SQL execution successful, changes committed (PostgreSQL)")
+                    return None, None
+
+                # For SELECT or RETURNING statements
+                if cur.description: # Check if there are columns to fetch
+                    colnames = [desc[0] for desc in cur.description]
+                    df = pd.DataFrame(cur.fetchall(), columns=colnames)
+                    print(f"DEBUG - Query returned dataframe with {len(df)} rows and {len(df.columns)} columns (PostgreSQL)")
+                    return df, None
+                else: # For statements like INSERT without RETURNING, or other commands that don't return rows
+                    print("DEBUG - SQL execution successful, no rows returned (PostgreSQL)")
+                    # self.postgres_conn.commit() # Ensure commit for DDL/DML that might not have RETURNING
+                    return None, None
+
+        except psycopg2.Error as e:
+            self.postgres_conn.rollback() # Rollback on error
+            error_msg = f"SQL Error (PostgreSQL): {e.pgcode} - {e.pgerror}"
+            if e.diag and e.diag.message_detail:
+                error_msg += f" Detail: {e.diag.message_detail}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - SQL execution traceback (PostgreSQL): {traceback.format_exc()}")
+            return None, error_msg
+        except Exception as e:
+            if self.postgres_conn and not self.postgres_conn.closed:
+                 self.postgres_conn.rollback() # Rollback on generic error if connection is still open
+            error_msg = f"Generic Error during PostgreSQL query: {str(e)}"
+            print(f"ERROR - {error_msg}")
+            print(f"ERROR - SQL execution traceback (PostgreSQL): {traceback.format_exc()}")
             return None, error_msg
 
     def get_table_metadata(self) -> pd.DataFrame:

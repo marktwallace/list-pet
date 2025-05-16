@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
 import streamlit as st
+import sys
 
 from .database import Database
 from .llm_handler import LLMHandler
@@ -80,7 +81,9 @@ class ConversationManager:
         sess = st.session_state
         sess.current_conversation_id = conv_id
         sess.db_messages = self.db.load_messages(conv_id)
-        sess.llm_handler = LLMHandler(sess.prompts, self.db)
+        # Pass model name from environment, defaulting if not set
+        openai_model_name = os.environ.get("OPENAI_MODEL_NAME") # LLMHandler will apply its own default if this is None
+        sess.llm_handler = LLMHandler(sess.prompts, self.db, model_name=openai_model_name)
         # Load messages into LLM handler
         for msg in sess.db_messages:
             sess.llm_handler.add_message(msg["role"], msg["content"])
@@ -243,10 +246,12 @@ class ConversationManager:
         sess = st.session_state
         sess.current_conversation_id = conv_id
         sess.db_messages = []
-        sess.llm_handler = LLMHandler(sess.prompts, self.db)
+        # Pass model name from environment, defaulting if not set
+        openai_model_name = os.environ.get("OPENAI_MODEL_NAME") # LLMHandler will apply its own default if this is None
+        sess.llm_handler = LLMHandler(sess.prompts, self.db, model_name=openai_model_name)
         
         # Add system prompt as first message
-        system_prompt = sess.llm_handler.get_system_prompt(self.db)
+        system_prompt = sess.llm_handler.get_system_prompt()
         self.add_message(role=SYSTEM_ROLE, content=system_prompt)
         
         # Add welcome message
@@ -292,7 +297,13 @@ class ConversationManager:
     def init_session_state(self):
         """Initialize session state with a new conversation"""
         sess = st.session_state
-        sess.prompts = get_prompts()
+        # Ensure config_base_path is available (should be set by streamlit_ui.py)
+        if 'config_base_path' not in sess:
+            # This is a fallback, should ideally be set by the entry script
+            print("WARNING: config_base_path not found in session_state, defaulting to '.' for get_prompts.", file=sys.stderr)
+            sess.config_base_path = "."
+            
+        sess.prompts = get_prompts(sess.config_base_path)
         
         # Get existing conversations
         conversations = self.db.get_conversations()
@@ -323,4 +334,8 @@ class ConversationManager:
         if "dev_mode" not in sess:
             sess.dev_mode = False
         if "llm_handler" not in sess:
-            sess.llm_handler = LLMHandler(get_prompts()) 
+            # Ensure prompts are loaded before LLMHandler initialization if it happens here
+            if 'prompts' not in sess:
+                sess.prompts = get_prompts(sess.config_base_path)
+            openai_model_name = os.environ.get("OPENAI_MODEL_NAME")
+            sess.llm_handler = LLMHandler(sess.prompts, self.db, model_name=openai_model_name) 

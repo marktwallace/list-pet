@@ -1,4 +1,5 @@
 jupyter
+dotenv
 duckdb
 streamlit
 langchain
@@ -13,4 +14,5 @@ typer
 pyyaml
 minio
 pathlib
+psycopg2-binary
 beautifulsoup4
