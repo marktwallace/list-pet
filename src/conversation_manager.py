@@ -305,6 +305,34 @@ class ConversationManager:
             
         sess.prompts = get_prompts(sess.config_base_path)
         
+        # --- Check for required prompt files --- START --- 
+        required_prompt_keys = ["system_prompt", "title", "welcome_message"]
+        missing_prompts_details = []
+        prompts_dir_path = os.path.join(sess.config_base_path, 'prompts') # For the error message
+
+        for key in required_prompt_keys:
+            if key not in sess.prompts or not sess.prompts[key]: # Also check if prompt content is empty
+                # Try to determine common extensions for the error message
+                possible_filenames = [f"{key}.txt", f"{key}.md", f"{key}.yaml", f"{key}"] 
+                missing_prompts_details.append(f"- '{key}' (expected as e.g., {', '.join(possible_filenames[:-1])} or {possible_filenames[-1]} in {prompts_dir_path}) - Content might be missing or file not found.")
+
+        if missing_prompts_details:
+            error_message_lines = [
+                f"Critical Startup Error: Missing Required Prompt Files",
+                f"The application cannot start because the following essential prompt files were not found or are empty in the directory: '{prompts_dir_path}'",
+                "Please ensure these files exist and contain the necessary prompt text:",
+                *missing_prompts_details,
+                "Example expected files: system_prompt.txt, title.txt, welcome_message.txt"
+            ]
+            full_error_message = "\n".join(error_message_lines)
+            
+            st.error(full_error_message)
+            # Correctly format the message for console logging with escaped newlines
+            console_friendly_message = full_error_message.replace('\n', r'\n') # Use raw string for replacement
+            print(f"ERROR - {console_friendly_message}", file=sys.stderr)
+            st.stop() # Halt Streamlit execution
+        # --- Check for required prompt files --- END --- 
+        
         # Get existing conversations
         conversations = self.db.get_conversations()
         

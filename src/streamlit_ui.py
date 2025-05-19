@@ -337,12 +337,25 @@ def process_sql_query(sql_tuple, db):
         print(f"DEBUG - SQL execution error: {err}")
         conv_manager.add_message(role=USER_ROLE, content=f"<error>\n{err}\n</error>\n")
         return True
-    
-    print(f"DEBUG - SQL execution completed, dataframe is {'None' if df is None else 'not None'}")
-    
+
+    # Determine if the query was expected to return rows (SELECT, WITH ... SELECT)
+    is_select_like_query = sql.strip().upper().startswith(("SELECT", "WITH"))
+
     if df is None:
-        return True
+        if is_select_like_query:
+            # For SELECT-like queries, if db.execute_query returns None (and no error),
+            # it implies an empty result set. We should represent this as an empty DataFrame.
+            print(f"DEBUG - SELECT-like query returned None. Assuming empty result set and creating an empty DataFrame.")
+            df = pd.DataFrame() # Create an empty DataFrame.
+        else:
+            # For non-SELECT queries (e.g., INSERT, UPDATE, DELETE without RETURNING, DDLs not creating tables),
+            # df being None is expected if the command doesn't return rows.
+            # No explicit message is needed; absence of error implies success.
+            print(f"DEBUG - Non-SELECT SQL execution completed, df is None as expected (e.g., DDL, DML without RETURNING). No explicit message will be added.")
+            return True # Signal to rerun, this SQL item is done.
     
+    print(f"DEBUG - SQL execution processing, df is {'None' if df is None else ('empty' if df.empty else 'DataFrame with data')}")
+        
     # Update dataframe mapping and get new name
     dataframe_name = update_dataframe_mapping(sess, sql, None)
     
@@ -358,10 +371,17 @@ def process_sql_query(sql_tuple, db):
             return f"{val:.4f}"
         return str(val)
     
-    tsv_lines = ["\t".join(df.columns)]
-    tsv_lines.extend("\t".join(format_value(val) for val in row) for _, row in df.iloc[:preview_rows].iterrows())
-    if preview_rows < len(df):
-        tsv_lines.append("...")
+    # Handle empty DataFrame or DataFrame with no columns for TSV preview
+    if df.empty:
+        if not list(df.columns): # No columns (e.g. from pd.DataFrame())
+            tsv_lines = ["(Query returned no columns and no rows)"]
+        else: # Has columns, but no rows
+            tsv_lines = ["\t".join(df.columns), "(Query returned no rows)"]
+    else:
+        tsv_lines = ["\t".join(df.columns)]
+        tsv_lines.extend("\t".join(format_value(val) for val in row) for _, row in df.iloc[:preview_rows].iterrows())
+        if preview_rows < len(df):
+            tsv_lines.append("...")
     
     # Create and add dataframe message
     content = f'<dataframe name="{dataframe_name}" table="{dataframe_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
@@ -555,66 +575,91 @@ def main():
     st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
     
     sess = st.session_state # Get session state early
+    global conv_manager # To assign to the global variable from session state
 
-    # Determine config_base_path from LISTPET_BASE environment variable or default
-    if 'config_base_path' not in sess:
-        config_base_env_var = os.environ.get("LISTPET_BASE")
-        if config_base_env_var:
-            sess.config_base_path = os.path.abspath(os.path.expanduser(config_base_env_var))
+    if 'app_initialized' not in sess:
+        print("DEBUG - Performing one-time application initialization...")
+
+        # 1. Determine config_base_path
+        if 'config_base_path' not in sess:
+            config_base_env_var = os.environ.get("LISTPET_BASE")
+            if config_base_env_var:
+                sess.config_base_path = os.path.abspath(os.path.expanduser(config_base_env_var))
+            else:
+                sess.config_base_path = os.path.abspath(".") # Default to project root
             print(f"DEBUG - Using LISTPET_BASE: {sess.config_base_path}")
-        else:
-            sess.config_base_path = os.path.abspath(".") # Default to project root
-            print(f"DEBUG - LISTPET_BASE not set, defaulting to project root: {sess.config_base_path}")
 
-    # Load environment variables from .env file at the config_base_path
-    dotenv_path = os.path.join(sess.config_base_path, ".env")
-    if os.path.exists(dotenv_path):
-        load_dotenv(dotenv_path=dotenv_path)
-        print(f"DEBUG - Loaded environment variables from: {dotenv_path}")
-    else:
-        print(f"DEBUG - .env file not found at: {dotenv_path}")
+        # 2. Load environment variables from .env file at the config_base_path
+        dotenv_path = os.path.join(sess.config_base_path, ".env")
+        if os.path.exists(dotenv_path):
+            load_dotenv(dotenv_path=dotenv_path)
+            print(f"DEBUG - Loaded environment variables from: {dotenv_path}")
+            sess.env_loaded = True
+        else:
+            print(f"DEBUG - .env file not found at: {dotenv_path}")
+            sess.env_loaded = False
     
+        # 3. Determine and store effective app mode
+        # This check uses os.environ, which should now be populated by load_dotenv
+        if 'effective_app_mode' not in sess:
+            if os.environ.get("POSTGRES_CONN_STR"):
+                sess.effective_app_mode = "postgres_enabled"
+            elif sess.config_base_path != os.path.abspath(".") and os.environ.get("DUCKDB_FILE"): # LISTPET_BASE was set
+                sess.effective_app_mode = "duckdb_custom_path"
+            else:
+                sess.effective_app_mode = "duckdb_default_path"
+            print(f"DEBUG - Effective Application Mode set to: {sess.effective_app_mode}")
+
+        # 4. Database connection (if DuckDB), Database instance, and ConversationManager instance
+        db_file_path = None # Initialize for clarity
+        if sess.effective_app_mode == "duckdb_custom_path":
+            custom_db_file = os.environ.get("DUCKDB_FILE", "list_pet.db") # Default if not set
+            if os.path.isabs(custom_db_file):
+                db_file_path = custom_db_file
+            else:
+                db_file_path = os.path.join(sess.config_base_path, custom_db_file)
+            print(f"DEBUG - Using DUCKDB_FILE (custom path): {db_file_path}")
+            db_dir = os.path.dirname(db_file_path)
+            if db_dir: # Ensure directory exists if custom_db_file includes a path
+                 os.makedirs(db_dir, exist_ok=True)
+
+        elif sess.effective_app_mode == "duckdb_default_path":
+            db_directory = os.path.join(sess.config_base_path, "db")
+            os.makedirs(db_directory, exist_ok=True)
+            db_file_path = os.path.join(db_directory, "list_pet.db")
+            print(f"DEBUG - DuckDB database path set to (default): {db_file_path}")
+        
+        if sess.effective_app_mode != "postgres_enabled" and db_file_path:
+            if 'conn' not in sess: # Connect DuckDB only once if not using Postgres
+                 sess.conn = duckdb.connect(db_file_path)
+                 print(f"DEBUG - Connected to DuckDB: {db_file_path}")
+        
+        # Instantiate DB and ConvManager, store in session state
+        if 'db' not in sess:
+            sess.db = Database() # Database() should handle its own connection logic (e.g. for Postgres using env var)
+            sess.db.initialize_pet_meta_schema() # This might use sess.conn if db is DuckDB
+            print("DEBUG - Database object initialized and schema checked/created.")
+
+        if 'conv_manager' not in sess:
+            sess.conv_manager = ConversationManager(sess.db)
+            sess.conv_manager.init_session_state() # Initializes sess.db_messages, etc.
+            print("DEBUG - ConversationManager initialized.")
+
+        sess.app_initialized = True
+        print("DEBUG - One-time application initialization complete.")
+
+    # Retrieve/assign core objects from session state for use in this run
+    # This ensures that global conv_manager and local db_instance point to the persistent session objects
+    conv_manager = sess.conv_manager 
+    db_instance = sess.db
+
     # Add CSS styles
     st.markdown(CODE_WRAP_STYLE, unsafe_allow_html=True)
     st.markdown(CONVERSATION_BUTTON_STYLE, unsafe_allow_html=True)
     
-    global conv_manager
-    
-    # Initialize database and session state (sess was already obtained)
-    # sess = st.session_state # No need to get it again
-
-    # Determine and store effective app mode based on POSTGRES_CONN_STR
-    if 'effective_app_mode' not in sess:
-        if os.environ.get("POSTGRES_CONN_STR"):
-            sess.effective_app_mode = "postgres_enabled"
-        else:
-            sess.effective_app_mode = "duckdb_only"
-        print(f"DEBUG - Effective Application Mode set to: {sess.effective_app_mode}")
-
-    # The old app_mode logic is removed:
-    # if "app_mode" not in sess:
-    #     sess.app_mode = os.environ.get("APP_MODE", "generic")
-    #     print(f"DEBUG - Application Mode set to: {sess.app_mode}")
-
-    if "conn" not in sess:  # app restart - create new session
-        # Determine the path for the DuckDB database file using config_base_path
-        db_directory = os.path.join(sess.config_base_path, "db")
-        os.makedirs(db_directory, exist_ok=True)
-        db_file_path = os.path.join(db_directory, "list_pet.db")
-        print(f"DEBUG - DuckDB database path set to: {db_file_path}")
-        
-        sess.conn = duckdb.connect(db_file_path)
-        db = Database()
-        db.initialize_pet_meta_schema()
-        conv_manager = ConversationManager(db)
-        conv_manager.init_session_state()
-    else:
-        db = Database()
-        conv_manager = ConversationManager(db)
-    
     # Render UI
     with st.sidebar:
-        conv_manager.render_sidebar()
+        sess.conv_manager.render_sidebar() # Use session state instance directly
     
     st.title("🐾 List Pet")
     st.caption("Your friendly SQL assistant")
@@ -624,7 +669,7 @@ def main():
         # Skip system message (first message) if not in dev mode
         if idx == 0 and not sess.dev_mode:
             continue
-        display_message(idx, message, sess, db)
+        display_message(idx, message, sess, db_instance) # Pass session-managed db_instance
 
     # Process pending items
     if sess.pending_python and sess.pending_python[0]:
@@ -634,7 +679,7 @@ def main():
 
     if sess.pending_sql and sess.pending_sql[0]:
         sql_tuple = sess.pending_sql.pop(0)
-        if process_sql_query(sql_tuple, db):
+        if process_sql_query(sql_tuple, db_instance): # Pass session-managed db_instance
             st.rerun()
 
     if sess.pending_chart and sess.pending_chart[0]:
@@ -647,16 +692,18 @@ def main():
             st.rerun()
         
     # Process user input    
-    if input := st.chat_input("Type your message..."):
+    user_chat_input = st.chat_input("Type your message...") # Renamed variable
+    if user_chat_input:
         # Process SQL syntax
-        if re.match(SQL_REGEX, input.strip(), re.IGNORECASE):
-            input = "<sql>\n" + input + "\n</sql>\n"
+        processed_input = user_chat_input
+        if re.match(SQL_REGEX, user_chat_input.strip(), re.IGNORECASE):
+            processed_input = "<sql>\\n" + user_chat_input + "\\n</sql>\\n"
         
-        conv_manager.add_message(role=USER_ROLE, content=input)
+        sess.conv_manager.add_message(role=USER_ROLE, content=processed_input) # Use session state instance
         
         
         # Check for SQL in input
-        msg = get_elements(input)
+        msg = get_elements(processed_input)
         if msg.get("sql"):
             sess.pending_sql = list(enumerate(msg.get("sql", [])))
         else:
