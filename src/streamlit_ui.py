@@ -273,6 +273,11 @@ def display_message(idx, message, sess, db):
         if message["role"] != SYSTEM_ROLE:
             msg = get_elements(message["content"])
             
+            if message["role"] == ASSISTANT_ROLE and "reasoning" in msg:
+                for item in msg["reasoning"]:
+                    with st.expander("Reasoning", expanded=False):
+                        st.markdown(item["content"])
+            
             if "markdown" in msg:
                 st.markdown(msg["markdown"])
             
@@ -285,6 +290,11 @@ def display_message(idx, message, sess, db):
                 for item in msg["python"]:
                     with st.expander(title_text(item["content"]), expanded=False):
                         st.code(item["content"], language="python")
+
+            if "chart" in msg: # Display raw chart configuration
+                for item in msg["chart"]:
+                    with st.expander(title_text(item["content"]), expanded=False):
+                        st.code(item["content"], language="yaml")
 
             if "dataframe" in msg:
                 for item in msg["dataframe"]:
@@ -303,6 +313,39 @@ def display_message(idx, message, sess, db):
                 for item in msg["error"]:
                     with st.expander(title_text(item["content"]), expanded=False):
                         st.code(item["content"])
+
+def _format_dataframe_preview_for_llm(df: pd.DataFrame) -> list[str]:
+    """Formats a DataFrame into a TSV-like list of strings for LLM preview, with head/tail truncation."""
+    N_ROWS_HEAD_TAIL = 5
+    THRESHOLD_FOR_HEAD_TAIL_DISPLAY = 2 * N_ROWS_HEAD_TAIL + 1
+
+    def format_value(val):
+        if isinstance(val, float):
+            return f"{val:.4f}"
+        return str(val)
+
+    if df.empty:
+        if not list(df.columns):  # No columns (e.g., from pd.DataFrame())
+            return ["(Query returned no columns and no rows)"]
+        else:  # Has columns, but no rows
+            return ["\\t".join(df.columns), "(Query returned no rows)"]
+    
+    tsv_lines = ["\\t".join(df.columns)]
+    if len(df) > THRESHOLD_FOR_HEAD_TAIL_DISPLAY:
+        # Head
+        for _, row in df.head(N_ROWS_HEAD_TAIL).iterrows():
+            tsv_lines.append("\\t".join(format_value(val) for val in row))
+        
+        omitted_count = len(df) - 2 * N_ROWS_HEAD_TAIL
+        tsv_lines.append(f"... {omitted_count} rows omitted ...")
+        
+        # Tail
+        for _, row in df.tail(N_ROWS_HEAD_TAIL).iterrows():
+            tsv_lines.append("\\t".join(format_value(val) for val in row))
+    else:  # Show all rows if it's short enough
+        for _, row in df.iterrows():
+            tsv_lines.append("\\t".join(format_value(val) for val in row))
+    return tsv_lines
 
 def process_sql_query(sql_tuple, db):
     """Process an SQL query and store results as a dataframe"""
@@ -363,25 +406,8 @@ def process_sql_query(sql_tuple, db):
     dataframe_key = f"dataframe_{dataframe_name}"
     sess[dataframe_key] = df
     
-    # Format preview for display with consistent float precision
-    preview_rows = min(5, len(df)) if len(df) > 20 else len(df)
-    
-    def format_value(val):
-        if isinstance(val, float):
-            return f"{val:.4f}"
-        return str(val)
-    
-    # Handle empty DataFrame or DataFrame with no columns for TSV preview
-    if df.empty:
-        if not list(df.columns): # No columns (e.g. from pd.DataFrame())
-            tsv_lines = ["(Query returned no columns and no rows)"]
-        else: # Has columns, but no rows
-            tsv_lines = ["\t".join(df.columns), "(Query returned no rows)"]
-    else:
-        tsv_lines = ["\t".join(df.columns)]
-        tsv_lines.extend("\t".join(format_value(val) for val in row) for _, row in df.iloc[:preview_rows].iterrows())
-        if preview_rows < len(df):
-            tsv_lines.append("...")
+    # Format preview for display
+    tsv_lines = _format_dataframe_preview_for_llm(df)
     
     # Create and add dataframe message
     content = f'<dataframe name="{dataframe_name}" table="{dataframe_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
@@ -529,17 +555,7 @@ def process_python_code(python_tuple):
         sess[dataframe_key] = result.dataframe
         
         # Format preview
-        preview_rows = min(5, len(result.dataframe)) if len(result.dataframe) > 20 else len(result.dataframe)
-        
-        def format_value(val):
-            if isinstance(val, float):
-                return f"{val:.4f}"
-            return str(val)
-        
-        tsv_lines = ["\t".join(result.dataframe.columns)]
-        tsv_lines.extend("\t".join(format_value(val) for val in row) for _, row in result.dataframe.iloc[:preview_rows].iterrows())
-        if preview_rows < len(result.dataframe):
-            tsv_lines.append("...")
+        tsv_lines = _format_dataframe_preview_for_llm(result.dataframe)
         
         # Create dataframe message
         content = f'<dataframe name="{dataframe_name}" table="{dataframe_name}" python_msg_idx="{msg_idx}" python_tag_idx="{python_idx}" >\n'
