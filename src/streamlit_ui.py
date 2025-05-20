@@ -28,8 +28,13 @@ from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
 from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
-from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON
+from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON, CONTINUE_AI_PLAN_BUTTON_STYLE
 from .python_executor import execute_python_code
+
+# Constants for continuation tags
+AI_PROPOSES_CONTINUATION_TAG = "ai_proposes_continuation"
+USER_APPROVES_CONTINUATION_TAG = "user_approves_continuation"
+USER_REQUESTS_ERROR_FIX_TAG = "user_requests_error_fix"
 
 conv_manager = None
 
@@ -66,9 +71,9 @@ def update_dataframe_mapping(sess, sql: str, dataframe_key: str) -> str:
     Extract table name from SQL and update the latest_dataframes mapping.
     Returns the new dataframe name.
     """
-    # Extract table name from SQL
+    # Extract table name from SQL. If no FROM clause, default to "metadata".
     table_match = re.search(r"FROM\s+(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
-    table_name = table_match.group(1) if table_match else "unknown"
+    table_name = table_match.group(1) if table_match else "metadata"
     
     # Update table counter and latest_dataframes mapping
     if table_name not in sess.table_counters:
@@ -346,6 +351,16 @@ def _format_dataframe_preview_for_llm(df: pd.DataFrame) -> list[str]:
         for _, row in df.iterrows():
             tsv_lines.append("\\t".join(format_value(val) for val in row))
     return tsv_lines
+
+def has_continuation_proposal(message_content: str) -> bool:
+    """Check if message content contains the AI continuation proposal tag."""
+    return f"<{AI_PROPOSES_CONTINUATION_TAG}/>" in message_content or f"<{AI_PROPOSES_CONTINUATION_TAG} />" in message_content
+
+def has_error_tag(message_content: str) -> bool:
+    """Check if message content contains an <error> tag."""
+    # The get_elements function in parsing.py will extract content within <error>...</error>
+    # So we just need to check for the presence of the tag itself.
+    return "<error>" in message_content.lower() # Check for the opening tag, case-insensitive
 
 def process_sql_query(sql_tuple, db):
     """Process an SQL query and store results as a dataframe"""
@@ -672,6 +687,7 @@ def main():
     # Add CSS styles
     st.markdown(CODE_WRAP_STYLE, unsafe_allow_html=True)
     st.markdown(CONVERSATION_BUTTON_STYLE, unsafe_allow_html=True)
+    st.markdown(CONTINUE_AI_PLAN_BUTTON_STYLE, unsafe_allow_html=True)
     
     # Render UI
     with st.sidebar:
@@ -686,6 +702,21 @@ def main():
         if idx == 0 and not sess.dev_mode:
             continue
         display_message(idx, message, sess, db_instance) # Pass session-managed db_instance
+
+    # Check if the last AI message proposes continuation
+    show_continue_ai_plan_button = False
+    show_fix_error_button = False
+
+    if sess.db_messages:
+        last_message = sess.db_messages[-1]
+        last_message_content = last_message["content"]
+
+        if last_message["role"] == ASSISTANT_ROLE and has_continuation_proposal(last_message_content):
+            show_continue_ai_plan_button = True
+        # Check for error tag in the last message, regardless of role, 
+        # as system-generated errors are added as USER_ROLE.
+        elif has_error_tag(last_message_content):
+            show_fix_error_button = True
 
     # Process pending items
     if sess.pending_python and sess.pending_python[0]:
@@ -707,6 +738,28 @@ def main():
         if generate_llm_response():
             st.rerun()
         
+    # Conditionally display the buttons
+    # The styling for these buttons is expected to be in ui_styles.py
+    # and applied globally via st.markdown.
+    # We use the same column structure for layout consistency.
+    if show_continue_ai_plan_button or show_fix_error_button:
+        container = st.container()
+        with container:
+            button_cols = st.columns([3, 7]) # Adjust ratio as needed
+            with button_cols[0]:
+                if show_continue_ai_plan_button:
+                    if st.button("Continue with AI's plan?", key="continue_ai_plan_button", type="primary"):
+                        approval_message = f"<{USER_APPROVES_CONTINUATION_TAG}/>"
+                        sess.conv_manager.add_message(role=USER_ROLE, content=approval_message)
+                        sess.pending_response = True 
+                        st.rerun()
+                elif show_fix_error_button:
+                    if st.button("Ask AI to fix this?", key="fix_error_button", type="primary"):
+                        fix_request_message = f"<{USER_REQUESTS_ERROR_FIX_TAG}/>"
+                        sess.conv_manager.add_message(role=USER_ROLE, content=fix_request_message)
+                        sess.pending_response = True
+                        st.rerun()
+
     # Process user input    
     user_chat_input = st.chat_input("Type your message...") # Renamed variable
     if user_chat_input:
