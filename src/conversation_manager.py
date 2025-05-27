@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
 import streamlit as st
+import sys
 
 from .database import Database
 from .llm_handler import LLMHandler
@@ -80,7 +81,9 @@ class ConversationManager:
         sess = st.session_state
         sess.current_conversation_id = conv_id
         sess.db_messages = self.db.load_messages(conv_id)
-        sess.llm_handler = LLMHandler(sess.prompts, self.db)
+        # Pass model name from environment, defaulting if not set
+        openai_model_name = os.environ.get("OPENAI_MODEL_NAME") # LLMHandler will apply its own default if this is None
+        sess.llm_handler = LLMHandler(sess.prompts, self.db, model_name=openai_model_name)
         # Load messages into LLM handler
         for msg in sess.db_messages:
             sess.llm_handler.add_message(msg["role"], msg["content"])
@@ -243,10 +246,12 @@ class ConversationManager:
         sess = st.session_state
         sess.current_conversation_id = conv_id
         sess.db_messages = []
-        sess.llm_handler = LLMHandler(sess.prompts, self.db)
+        # Pass model name from environment, defaulting if not set
+        openai_model_name = os.environ.get("OPENAI_MODEL_NAME") # LLMHandler will apply its own default if this is None
+        sess.llm_handler = LLMHandler(sess.prompts, self.db, model_name=openai_model_name)
         
         # Add system prompt as first message
-        system_prompt = sess.llm_handler.get_system_prompt(self.db)
+        system_prompt = sess.llm_handler.get_system_prompt()
         self.add_message(role=SYSTEM_ROLE, content=system_prompt)
         
         # Add welcome message
@@ -292,7 +297,41 @@ class ConversationManager:
     def init_session_state(self):
         """Initialize session state with a new conversation"""
         sess = st.session_state
-        sess.prompts = get_prompts()
+        # Ensure config_base_path is available (should be set by streamlit_ui.py)
+        if 'config_base_path' not in sess:
+            # This is a fallback, should ideally be set by the entry script
+            print("WARNING: config_base_path not found in session_state, defaulting to '.' for get_prompts.", file=sys.stderr)
+            sess.config_base_path = "."
+            
+        sess.prompts = get_prompts(sess.config_base_path)
+        
+        # --- Check for required prompt files --- START --- 
+        required_prompt_keys = ["system_prompt", "title", "welcome_message"]
+        missing_prompts_details = []
+        prompts_dir_path = os.path.join(sess.config_base_path, 'prompts') # For the error message
+
+        for key in required_prompt_keys:
+            if key not in sess.prompts or not sess.prompts[key]: # Also check if prompt content is empty
+                # Try to determine common extensions for the error message
+                possible_filenames = [f"{key}.txt", f"{key}.md", f"{key}.yaml", f"{key}"] 
+                missing_prompts_details.append(f"- '{key}' (expected as e.g., {', '.join(possible_filenames[:-1])} or {possible_filenames[-1]} in {prompts_dir_path}) - Content might be missing or file not found.")
+
+        if missing_prompts_details:
+            error_message_lines = [
+                f"Critical Startup Error: Missing Required Prompt Files",
+                f"The application cannot start because the following essential prompt files were not found or are empty in the directory: '{prompts_dir_path}'",
+                "Please ensure these files exist and contain the necessary prompt text:",
+                *missing_prompts_details,
+                "Example expected files: system_prompt.txt, title.txt, welcome_message.txt"
+            ]
+            full_error_message = "\n".join(error_message_lines)
+            
+            st.error(full_error_message)
+            # Correctly format the message for console logging with escaped newlines
+            console_friendly_message = full_error_message.replace('\n', r'\n') # Use raw string for replacement
+            print(f"ERROR - {console_friendly_message}", file=sys.stderr)
+            st.stop() # Halt Streamlit execution
+        # --- Check for required prompt files --- END --- 
         
         # Get existing conversations
         conversations = self.db.get_conversations()
@@ -323,4 +362,8 @@ class ConversationManager:
         if "dev_mode" not in sess:
             sess.dev_mode = False
         if "llm_handler" not in sess:
-            sess.llm_handler = LLMHandler(get_prompts()) 
+            # Ensure prompts are loaded before LLMHandler initialization if it happens here
+            if 'prompts' not in sess:
+                sess.prompts = get_prompts(sess.config_base_path)
+            openai_model_name = os.environ.get("OPENAI_MODEL_NAME")
+            sess.llm_handler = LLMHandler(sess.prompts, self.db, model_name=openai_model_name) 

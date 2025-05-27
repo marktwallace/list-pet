@@ -138,3 +138,36 @@ button[data-testid="baseButton-secondary"]:has(div:contains("✂️")) div[data-
 """
 
 # Add more styles here as needed 
+
+CONTINUE_AI_PLAN_BUTTON_STYLE = """
+<style>
+/* Styling for the action buttons */
+button[key="continue_ai_plan_button"],
+button[key="fix_error_button"] {
+    background-color: #00cc66 !important;
+    border-color: #00cc66 !important;
+    color: white !important;
+}
+
+/* Hover effect for both buttons */
+button[key="continue_ai_plan_button"]:hover,
+button[key="fix_error_button"]:hover {
+    background-color: #00b359 !important;
+    border-color: #00b359 !important;
+    color: white !important;
+}
+
+/* Additional selectors for better specificity */
+div.stButton button[data-testid="baseButton-primary"][key="continue_ai_plan_button"],
+div.stButton button[data-testid="baseButton-primary"][key="fix_error_button"] {
+    background-color: #00cc66 !important;
+    border-color: #00cc66 !important;
+}
+
+div.stButton button[data-testid="baseButton-primary"][key="continue_ai_plan_button"]:hover,
+div.stButton button[data-testid="baseButton-primary"][key="fix_error_button"]:hover {
+    background-color: #00b359 !important;
+    border-color: #00b359 !important;
+}
+</style>
+""" 

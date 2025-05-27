@@ -7,17 +7,31 @@ import re
 # Format: @include path/to/file.txt
 INCLUDE_PATTERN = r'^\s*@include\s+(.+?)\s*$'
 
-def get_prompts():
+def get_prompts(config_base_path: str):
     prompts = {}
-    prompts_dir = "prompts"
-    
+    prompts_dir = os.path.join(config_base_path, "prompts")
+
+    if not os.path.isdir(prompts_dir):
+        print(f"ERROR: Prompts directory not found: {prompts_dir}. Returning empty prompts.", file=sys.stderr)
+        # Try falling back to a local prompts dir if config_base_path was used but prompts not there
+        if config_base_path != ".": # Check if it wasn't already the default path
+            fallback_prompts_dir = os.path.join(".", "prompts")
+            if os.path.isdir(fallback_prompts_dir):
+                print(f"INFO: Falling back to local prompts directory: {fallback_prompts_dir}", file=sys.stderr)
+                prompts_dir = fallback_prompts_dir
+            else:
+                return prompts # Return empty if fallback also not found
+        else:
+            return prompts # Return empty if default path prompts not found
+        
     # Get all files in prompts directory
     for filename in os.listdir(prompts_dir):
-        if os.path.isfile(os.path.join(prompts_dir, filename)):
+        file_path = os.path.join(prompts_dir, filename)
+        if os.path.isfile(file_path):
             # Get base name without extension
             base_name = os.path.splitext(filename)[0]
             # Process file and store result
-            prompts[base_name] = process_file(os.path.join(prompts_dir, filename))
+            prompts[base_name] = process_file(file_path)
             
     return prompts
 

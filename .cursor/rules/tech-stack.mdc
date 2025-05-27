@@ -8,7 +8,8 @@ alwaysApply: false
 
 - Do not extend the tech stack without asking
 - Python 3.10
-- streamlit
+- Streamlit
 - Plotly Graph Objects (exclusively, no backward compatiblity)
-- langchain
+- Langchain
 - DuckDB
+- Postgres

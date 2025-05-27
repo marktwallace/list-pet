@@ -2,11 +2,13 @@ from datetime import datetime
 import os
 import re
 import traceback
+import sys
 
 import duckdb
 import streamlit as st
 import pandas as pd
 import numpy as np
+from dotenv import load_dotenv
 
 # Set pandas display options for better float formatting
 pd.set_option('display.float_format', lambda x: '{:.3f}'.format(x) if abs(x) < 1000 else '{:.1f}'.format(x))
@@ -26,8 +28,13 @@ from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
 from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
-from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON
+from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON, CONTINUE_AI_PLAN_BUTTON_STYLE
 from .python_executor import execute_python_code
+
+# Constants for continuation tags
+AI_PROPOSES_CONTINUATION_TAG = "ai_proposes_continuation"
+USER_APPROVES_CONTINUATION_TAG = "user_approves_continuation"
+USER_REQUESTS_ERROR_FIX_TAG = "user_requests_error_fix"
 
 conv_manager = None
 
@@ -64,9 +71,9 @@ def update_dataframe_mapping(sess, sql: str, dataframe_key: str) -> str:
     Extract table name from SQL and update the latest_dataframes mapping.
     Returns the new dataframe name.
     """
-    # Extract table name from SQL
+    # Extract table name from SQL. If no FROM clause, default to "metadata".
     table_match = re.search(r"FROM\s+(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
-    table_name = table_match.group(1) if table_match else "unknown"
+    table_name = table_match.group(1) if table_match else "metadata"
     
     # Update table counter and latest_dataframes mapping
     if table_name not in sess.table_counters:
@@ -271,6 +278,11 @@ def display_message(idx, message, sess, db):
         if message["role"] != SYSTEM_ROLE:
             msg = get_elements(message["content"])
             
+            if message["role"] == ASSISTANT_ROLE and "reasoning" in msg:
+                for item in msg["reasoning"]:
+                    with st.expander("Reasoning", expanded=False):
+                        st.markdown(item["content"])
+            
             if "markdown" in msg:
                 st.markdown(msg["markdown"])
             
@@ -283,6 +295,11 @@ def display_message(idx, message, sess, db):
                 for item in msg["python"]:
                     with st.expander(title_text(item["content"]), expanded=False):
                         st.code(item["content"], language="python")
+
+            if "chart" in msg: # Display raw chart configuration
+                for item in msg["chart"]:
+                    with st.expander(title_text(item["content"]), expanded=False):
+                        st.code(item["content"], language="yaml")
 
             if "dataframe" in msg:
                 for item in msg["dataframe"]:
@@ -302,11 +319,63 @@ def display_message(idx, message, sess, db):
                     with st.expander(title_text(item["content"]), expanded=False):
                         st.code(item["content"])
 
+def _format_dataframe_preview_for_llm(df: pd.DataFrame) -> list[str]:
+    """Formats a DataFrame into a TSV-like list of strings for LLM preview, with head/tail truncation."""
+    N_ROWS_HEAD_TAIL = 5
+    THRESHOLD_FOR_HEAD_TAIL_DISPLAY = 2 * N_ROWS_HEAD_TAIL + 10
+
+    def format_value(val):
+        if isinstance(val, float):
+            return f"{val:.4f}"
+        return str(val)
+
+    if df.empty:
+        if not list(df.columns):  # No columns (e.g., from pd.DataFrame())
+            return ["(Query returned no columns and no rows)"]
+        else:  # Has columns, but no rows
+            return ["\\t".join(df.columns), "(Query returned no rows)"]
+    
+    tsv_lines = ["\\t".join(df.columns)]
+    if len(df) > THRESHOLD_FOR_HEAD_TAIL_DISPLAY:
+        # Head
+        for _, row in df.head(N_ROWS_HEAD_TAIL).iterrows():
+            tsv_lines.append("\\t".join(format_value(val) for val in row))
+        
+        omitted_count = len(df) - 2 * N_ROWS_HEAD_TAIL
+        tsv_lines.append(f"... {omitted_count} rows omitted ...")
+        
+        # Tail
+        for _, row in df.tail(N_ROWS_HEAD_TAIL).iterrows():
+            tsv_lines.append("\\t".join(format_value(val) for val in row))
+    else:  # Show all rows if it's short enough
+        for _, row in df.iterrows():
+            tsv_lines.append("\\t".join(format_value(val) for val in row))
+    return tsv_lines
+
+def has_continuation_proposal(message_content: str) -> bool:
+    """Check if message content contains the AI continuation proposal tag."""
+    return f"<{AI_PROPOSES_CONTINUATION_TAG}/>" in message_content or f"<{AI_PROPOSES_CONTINUATION_TAG} />" in message_content
+
+def find_continuation_proposal(messages):
+    """Check if the most recent ASSISTANT message contains a continuation tag."""
+    for message in reversed(messages):
+        if message["role"] == ASSISTANT_ROLE:
+            # Found the most recent assistant message
+            return has_continuation_proposal(message["content"])
+    return False
+
+def has_error_tag(message_content: str) -> bool:
+    """Check if message content contains an <error> tag."""
+    # The get_elements function in parsing.py will extract content within <error>...</error>
+    # So we just need to check for the presence of the tag itself.
+    return "<error>" in message_content.lower() # Check for the opening tag, case-insensitive
+
 def process_sql_query(sql_tuple, db):
     """Process an SQL query and store results as a dataframe"""
     sess = st.session_state
     sql_idx, sql_item = sql_tuple
     sql = sql_item["content"]
+    
     print(f"DEBUG - Processing SQL query: {sql[:100]}...")
     msg_idx = len(sess.db_messages) - 1
     
@@ -335,12 +404,25 @@ def process_sql_query(sql_tuple, db):
         print(f"DEBUG - SQL execution error: {err}")
         conv_manager.add_message(role=USER_ROLE, content=f"<error>\n{err}\n</error>\n")
         return True
-    
-    print(f"DEBUG - SQL execution completed, dataframe is {'None' if df is None else 'not None'}")
-    
+
+    # Determine if the query was expected to return rows (SELECT, WITH ... SELECT)
+    is_select_like_query = sql.strip().upper().startswith(("SELECT", "WITH"))
+
     if df is None:
-        return True
+        if is_select_like_query:
+            # For SELECT-like queries, if db.execute_query returns None (and no error),
+            # it implies an empty result set. We should represent this as an empty DataFrame.
+            print(f"DEBUG - SELECT-like query returned None. Assuming empty result set and creating an empty DataFrame.")
+            df = pd.DataFrame() # Create an empty DataFrame.
+        else:
+            # For non-SELECT queries (e.g., INSERT, UPDATE, DELETE without RETURNING, DDLs not creating tables),
+            # df being None is expected if the command doesn't return rows.
+            # No explicit message is needed; absence of error implies success.
+            print(f"DEBUG - Non-SELECT SQL execution completed, df is None as expected (e.g., DDL, DML without RETURNING). No explicit message will be added.")
+            return True # Signal to rerun, this SQL item is done.
     
+    print(f"DEBUG - SQL execution processing, df is {'None' if df is None else ('empty' if df.empty else 'DataFrame with data')}")
+        
     # Update dataframe mapping and get new name
     dataframe_name = update_dataframe_mapping(sess, sql, None)
     
@@ -348,18 +430,8 @@ def process_sql_query(sql_tuple, db):
     dataframe_key = f"dataframe_{dataframe_name}"
     sess[dataframe_key] = df
     
-    # Format preview for display with consistent float precision
-    preview_rows = min(5, len(df)) if len(df) > 20 else len(df)
-    
-    def format_value(val):
-        if isinstance(val, float):
-            return f"{val:.4f}"
-        return str(val)
-    
-    tsv_lines = ["\t".join(df.columns)]
-    tsv_lines.extend("\t".join(format_value(val) for val in row) for _, row in df.iloc[:preview_rows].iterrows())
-    if preview_rows < len(df):
-        tsv_lines.append("...")
+    # Format preview for display
+    tsv_lines = _format_dataframe_preview_for_llm(df)
     
     # Create and add dataframe message
     content = f'<dataframe name="{dataframe_name}" table="{dataframe_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
@@ -507,17 +579,7 @@ def process_python_code(python_tuple):
         sess[dataframe_key] = result.dataframe
         
         # Format preview
-        preview_rows = min(5, len(result.dataframe)) if len(result.dataframe) > 20 else len(result.dataframe)
-        
-        def format_value(val):
-            if isinstance(val, float):
-                return f"{val:.4f}"
-            return str(val)
-        
-        tsv_lines = ["\t".join(result.dataframe.columns)]
-        tsv_lines.extend("\t".join(format_value(val) for val in row) for _, row in result.dataframe.iloc[:preview_rows].iterrows())
-        if preview_rows < len(result.dataframe):
-            tsv_lines.append("...")
+        tsv_lines = _format_dataframe_preview_for_llm(result.dataframe)
         
         # Create dataframe message
         content = f'<dataframe name="{dataframe_name}" table="{dataframe_name}" python_msg_idx="{msg_idx}" python_tag_idx="{python_idx}" >\n'
@@ -552,27 +614,105 @@ def generate_llm_response():
 def main():
     st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
     
+    sess = st.session_state # Get session state early
+    global conv_manager # To assign to the global variable from session state
+
+    if 'app_initialized' not in sess:
+        print("DEBUG - Performing one-time application initialization...")
+
+        # 1. Determine config_base_path
+        if 'config_base_path' not in sess:
+            config_base_env_var = os.environ.get("LISTPET_BASE")
+            if config_base_env_var:
+                sess.config_base_path = os.path.abspath(os.path.expanduser(config_base_env_var))
+            else:
+                sess.config_base_path = os.path.abspath(".") # Default to project root
+            print(f"DEBUG - Using LISTPET_BASE: {sess.config_base_path}")
+
+        # 2. Load environment variables from .env file at the config_base_path
+        dotenv_path = os.path.join(sess.config_base_path, ".env")
+        settings_dotenv_path = os.path.join(sess.config_base_path, "settings.env")
+
+        if os.path.exists(settings_dotenv_path):
+            load_dotenv(dotenv_path=settings_dotenv_path)
+            print(f"DEBUG - Loaded environment variables from: {settings_dotenv_path}")
+
+        if os.path.exists(dotenv_path):
+            load_dotenv(dotenv_path=dotenv_path, override=True)
+            print(f"DEBUG - Loaded environment variables from: {dotenv_path} (overriding where applicable)")
+            sess.env_loaded = True
+        else:
+            print(f"DEBUG - .env file not found at: {dotenv_path}")
+            # sess.env_loaded remains False if only settings.env was loaded,
+            # or becomes True if .env was also found.
+            # We can consider settings.env to contribute to env_loaded status.
+            if os.path.exists(settings_dotenv_path):
+                 sess.env_loaded = True
+            else:
+                 sess.env_loaded = False
+    
+        # 3. Determine and store effective app mode
+        # This check uses os.environ, which should now be populated by load_dotenv
+        if 'effective_app_mode' not in sess:
+            if os.environ.get("POSTGRES_CONN_STR"):
+                sess.effective_app_mode = "postgres_enabled"
+            elif sess.config_base_path != os.path.abspath(".") and os.environ.get("DUCKDB_FILE"): # LISTPET_BASE was set
+                sess.effective_app_mode = "duckdb_custom_path"
+            else:
+                sess.effective_app_mode = "duckdb_default_path"
+            print(f"DEBUG - Effective Application Mode set to: {sess.effective_app_mode}")
+
+        # 4. Database connection (if DuckDB), Database instance, and ConversationManager instance
+        db_file_path = None # Initialize for clarity
+        if sess.effective_app_mode == "duckdb_custom_path":
+            custom_db_file = os.environ.get("DUCKDB_FILE", "list_pet.db") # Default if not set
+            if os.path.isabs(custom_db_file):
+                db_file_path = custom_db_file
+            else:
+                db_file_path = os.path.join(sess.config_base_path, custom_db_file)
+            print(f"DEBUG - Using DUCKDB_FILE (custom path): {db_file_path}")
+            db_dir = os.path.dirname(db_file_path)
+            if db_dir: # Ensure directory exists if custom_db_file includes a path
+                 os.makedirs(db_dir, exist_ok=True)
+
+        elif sess.effective_app_mode == "duckdb_default_path":
+            db_directory = os.path.join(sess.config_base_path, "db")
+            os.makedirs(db_directory, exist_ok=True)
+            db_file_path = os.path.join(db_directory, "list_pet.db")
+            print(f"DEBUG - DuckDB database path set to (default): {db_file_path}")
+        
+        if sess.effective_app_mode != "postgres_enabled" and db_file_path:
+            if 'conn' not in sess: # Connect DuckDB only once if not using Postgres
+                 sess.conn = duckdb.connect(db_file_path)
+                 print(f"DEBUG - Connected to DuckDB: {db_file_path}")
+        
+        # Instantiate DB and ConvManager, store in session state
+        if 'db' not in sess:
+            sess.db = Database() # Database() should handle its own connection logic (e.g. for Postgres using env var)
+            sess.db.initialize_pet_meta_schema() # This might use sess.conn if db is DuckDB
+            print("DEBUG - Database object initialized and schema checked/created.")
+
+        if 'conv_manager' not in sess:
+            sess.conv_manager = ConversationManager(sess.db)
+            sess.conv_manager.init_session_state() # Initializes sess.db_messages, etc.
+            print("DEBUG - ConversationManager initialized.")
+
+        sess.app_initialized = True
+        print("DEBUG - One-time application initialization complete.")
+
+    # Retrieve/assign core objects from session state for use in this run
+    # This ensures that global conv_manager and local db_instance point to the persistent session objects
+    conv_manager = sess.conv_manager 
+    db_instance = sess.db
+
     # Add CSS styles
     st.markdown(CODE_WRAP_STYLE, unsafe_allow_html=True)
     st.markdown(CONVERSATION_BUTTON_STYLE, unsafe_allow_html=True)
-    
-    global conv_manager
-    
-    # Initialize database and session state
-    sess = st.session_state
-    if "conn" not in sess:  # app restart - create new session
-        sess.conn = duckdb.connect('db/list_pet.db')
-        db = Database()
-        db.initialize_pet_meta_schema()
-        conv_manager = ConversationManager(db)
-        conv_manager.init_session_state()
-    else:
-        db = Database()
-        conv_manager = ConversationManager(db)
+    st.markdown(CONTINUE_AI_PLAN_BUTTON_STYLE, unsafe_allow_html=True)
     
     # Render UI
     with st.sidebar:
-        conv_manager.render_sidebar()
+        sess.conv_manager.render_sidebar() # Use session state instance directly
     
     st.title("🐾 List Pet")
     st.caption("Your friendly SQL assistant")
@@ -582,7 +722,32 @@ def main():
         # Skip system message (first message) if not in dev mode
         if idx == 0 and not sess.dev_mode:
             continue
-        display_message(idx, message, sess, db)
+        display_message(idx, message, sess, db_instance) # Pass session-managed db_instance
+
+    # Check if the last AI message proposes continuation
+    show_continue_ai_plan_button = False
+    show_fix_error_button = False
+
+    if sess.db_messages:
+        last_message = sess.db_messages[-1]
+        last_message_content = last_message["content"]
+        
+        # Debug output
+        print(f"DEBUG - Last message role: {last_message['role']}")
+        print(f"DEBUG - Last message contains continuation tag: {has_continuation_proposal(last_message_content)}")
+        print(f"DEBUG - Last message content: {last_message_content[:200]}...")  # Show first 200 chars
+        
+        # Check for continuation proposal in any recent assistant message
+        found_continuation = find_continuation_proposal(sess.db_messages)
+        print(f"DEBUG - Found continuation proposal in recent messages: {found_continuation}")
+        
+        if found_continuation:
+            show_continue_ai_plan_button = True
+            print("DEBUG - Setting show_continue_ai_plan_button to True")
+        # Check for error tag in the last message, regardless of role, 
+        # as system-generated errors are added as USER_ROLE.
+        elif has_error_tag(last_message_content):
+            show_fix_error_button = True
 
     # Process pending items
     if sess.pending_python and sess.pending_python[0]:
@@ -592,7 +757,7 @@ def main():
 
     if sess.pending_sql and sess.pending_sql[0]:
         sql_tuple = sess.pending_sql.pop(0)
-        if process_sql_query(sql_tuple, db):
+        if process_sql_query(sql_tuple, db_instance): # Pass session-managed db_instance
             st.rerun()
 
     if sess.pending_chart and sess.pending_chart[0]:
@@ -604,17 +769,41 @@ def main():
         if generate_llm_response():
             st.rerun()
         
+    # Conditionally display the buttons
+    # The styling for these buttons is expected to be in ui_styles.py
+    # and applied globally via st.markdown.
+    # We use the same column structure for layout consistency.
+    if show_continue_ai_plan_button or show_fix_error_button:
+        container = st.container()
+        with container:
+            button_cols = st.columns([3, 7]) # Adjust ratio as needed
+            with button_cols[0]:
+                if show_continue_ai_plan_button:
+                    if st.button("Continue with AI's plan?", key="continue_ai_plan_button", type="primary"):
+                        approval_message = f"<{USER_APPROVES_CONTINUATION_TAG}/>"
+                        sess.conv_manager.add_message(role=USER_ROLE, content=approval_message)
+                        sess.pending_response = True 
+                        st.rerun()
+                elif show_fix_error_button:
+                    if st.button("Ask AI to fix this?", key="fix_error_button", type="primary"):
+                        fix_request_message = f"<{USER_REQUESTS_ERROR_FIX_TAG}/>"
+                        sess.conv_manager.add_message(role=USER_ROLE, content=fix_request_message)
+                        sess.pending_response = True
+                        st.rerun()
+
     # Process user input    
-    if input := st.chat_input("Type your message..."):
+    user_chat_input = st.chat_input("Type your message...") # Renamed variable
+    if user_chat_input:
         # Process SQL syntax
-        if re.match(SQL_REGEX, input.strip(), re.IGNORECASE):
-            input = "<sql>\n" + input + "\n</sql>\n"
+        processed_input = user_chat_input
+        if re.match(SQL_REGEX, user_chat_input.strip(), re.IGNORECASE):
+            processed_input = "<sql>\n" + user_chat_input + "\n</sql>\n"
         
-        conv_manager.add_message(role=USER_ROLE, content=input)
+        sess.conv_manager.add_message(role=USER_ROLE, content=processed_input) # Use session state instance
         
         
         # Check for SQL in input
-        msg = get_elements(input)
+        msg = get_elements(processed_input)
         if msg.get("sql"):
             sess.pending_sql = list(enumerate(msg.get("sql", [])))
         else:
