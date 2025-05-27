@@ -631,13 +631,25 @@ def main():
 
         # 2. Load environment variables from .env file at the config_base_path
         dotenv_path = os.path.join(sess.config_base_path, ".env")
+        settings_dotenv_path = os.path.join(sess.config_base_path, "settings.env")
+
+        if os.path.exists(settings_dotenv_path):
+            load_dotenv(dotenv_path=settings_dotenv_path)
+            print(f"DEBUG - Loaded environment variables from: {settings_dotenv_path}")
+
         if os.path.exists(dotenv_path):
-            load_dotenv(dotenv_path=dotenv_path)
-            print(f"DEBUG - Loaded environment variables from: {dotenv_path}")
+            load_dotenv(dotenv_path=dotenv_path, override=True)
+            print(f"DEBUG - Loaded environment variables from: {dotenv_path} (overriding where applicable)")
             sess.env_loaded = True
         else:
             print(f"DEBUG - .env file not found at: {dotenv_path}")
-            sess.env_loaded = False
+            # sess.env_loaded remains False if only settings.env was loaded,
+            # or becomes True if .env was also found.
+            # We can consider settings.env to contribute to env_loaded status.
+            if os.path.exists(settings_dotenv_path):
+                 sess.env_loaded = True
+            else:
+                 sess.env_loaded = False
     
         # 3. Determine and store effective app mode
         # This check uses os.environ, which should now be populated by load_dotenv
