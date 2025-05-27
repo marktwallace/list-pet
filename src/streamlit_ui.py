@@ -322,7 +322,7 @@ def display_message(idx, message, sess, db):
 def _format_dataframe_preview_for_llm(df: pd.DataFrame) -> list[str]:
     """Formats a DataFrame into a TSV-like list of strings for LLM preview, with head/tail truncation."""
     N_ROWS_HEAD_TAIL = 5
-    THRESHOLD_FOR_HEAD_TAIL_DISPLAY = 2 * N_ROWS_HEAD_TAIL + 1
+    THRESHOLD_FOR_HEAD_TAIL_DISPLAY = 2 * N_ROWS_HEAD_TAIL + 10
 
     def format_value(val):
         if isinstance(val, float):
@@ -356,6 +356,14 @@ def has_continuation_proposal(message_content: str) -> bool:
     """Check if message content contains the AI continuation proposal tag."""
     return f"<{AI_PROPOSES_CONTINUATION_TAG}/>" in message_content or f"<{AI_PROPOSES_CONTINUATION_TAG} />" in message_content
 
+def find_continuation_proposal(messages):
+    """Check if the most recent ASSISTANT message contains a continuation tag."""
+    for message in reversed(messages):
+        if message["role"] == ASSISTANT_ROLE:
+            # Found the most recent assistant message
+            return has_continuation_proposal(message["content"])
+    return False
+
 def has_error_tag(message_content: str) -> bool:
     """Check if message content contains an <error> tag."""
     # The get_elements function in parsing.py will extract content within <error>...</error>
@@ -367,6 +375,7 @@ def process_sql_query(sql_tuple, db):
     sess = st.session_state
     sql_idx, sql_item = sql_tuple
     sql = sql_item["content"]
+    
     print(f"DEBUG - Processing SQL query: {sql[:100]}...")
     msg_idx = len(sess.db_messages) - 1
     
@@ -710,9 +719,19 @@ def main():
     if sess.db_messages:
         last_message = sess.db_messages[-1]
         last_message_content = last_message["content"]
-
-        if last_message["role"] == ASSISTANT_ROLE and has_continuation_proposal(last_message_content):
+        
+        # Debug output
+        print(f"DEBUG - Last message role: {last_message['role']}")
+        print(f"DEBUG - Last message contains continuation tag: {has_continuation_proposal(last_message_content)}")
+        print(f"DEBUG - Last message content: {last_message_content[:200]}...")  # Show first 200 chars
+        
+        # Check for continuation proposal in any recent assistant message
+        found_continuation = find_continuation_proposal(sess.db_messages)
+        print(f"DEBUG - Found continuation proposal in recent messages: {found_continuation}")
+        
+        if found_continuation:
             show_continue_ai_plan_button = True
+            print("DEBUG - Setting show_continue_ai_plan_button to True")
         # Check for error tag in the last message, regardless of role, 
         # as system-generated errors are added as USER_ROLE.
         elif has_error_tag(last_message_content):
@@ -766,7 +785,7 @@ def main():
         # Process SQL syntax
         processed_input = user_chat_input
         if re.match(SQL_REGEX, user_chat_input.strip(), re.IGNORECASE):
-            processed_input = "<sql>\\n" + user_chat_input + "\\n</sql>\\n"
+            processed_input = "<sql>\n" + user_chat_input + "\n</sql>\n"
         
         sess.conv_manager.add_message(role=USER_ROLE, content=processed_input) # Use session state instance
         
