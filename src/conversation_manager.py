@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import sys
 
-from .database import Database
+from .metadata_database import MetadataDatabase
 from .llm_handler import LLMHandler
 from .parsing import get_elements
 from .prompt_loader import get_prompts
@@ -15,8 +15,8 @@ ASSISTANT_ROLE = "assistant"
 SYSTEM_ROLE = "system"
 
 class ConversationManager:
-    def __init__(self, db: Database):
-        self.db = db
+    def __init__(self, metadata_db: MetadataDatabase):
+        self.metadata_db = metadata_db
         if 'logfile' not in st.session_state:
             self._init_logging()
         
@@ -80,10 +80,10 @@ class ConversationManager:
         """Helper method to load a conversation and update session state"""
         sess = st.session_state
         sess.current_conversation_id = conv_id
-        sess.db_messages = self.db.load_messages(conv_id)
+        sess.db_messages = self.metadata_db.load_messages(conv_id)
         # Pass model name from environment, defaulting if not set
         openai_model_name = os.environ.get("OPENAI_MODEL_NAME") # LLMHandler will apply its own default if this is None
-        sess.llm_handler = LLMHandler(sess.prompts, self.db, model_name=openai_model_name)
+        sess.llm_handler = LLMHandler(sess.prompts, self.metadata_db, model_name=openai_model_name)
         # Load messages into LLM handler
         for msg in sess.db_messages:
             sess.llm_handler.add_message(msg["role"], msg["content"])
@@ -106,10 +106,21 @@ class ConversationManager:
                 else:
                     st.sidebar.warning("No conversations flagged for training found.")
         
+        # Show analytic database status
+        if hasattr(st.session_state, 'analytic_db') and st.session_state.analytic_db:
+            info = st.session_state.analytic_db.get_connection_info()
+            db_type = info.get('type', 'Unknown')
+            if info.get('connected', False):
+                st.sidebar.success(f"📊 {db_type} Connected")
+            else:
+                st.sidebar.error(f"📊 {db_type} Disconnected")
+        else:
+            st.sidebar.warning("📊 No Analytic DB")
+        
         st.sidebar.divider()
         
         # Get all conversations first
-        conversations = self.db.get_conversations()
+        conversations = self.metadata_db.get_conversations()
         
         # Process any pending renames from previous switch
         pending_renames = [k for k in st.session_state.keys() if k.startswith("pending_rename_")]
@@ -120,13 +131,13 @@ class ConversationManager:
             print(f"DEBUG - Processing rename for conversation {conv_id}")
             
             # Generate and apply the new name
-            messages = self.db.load_messages(conv_id)
+            messages = self.metadata_db.load_messages(conv_id)
             print(f"DEBUG - Loaded {len(messages)} messages for rename")
             new_title = self.generate_conversation_title(messages)
             print(f"DEBUG - Generated new title: {new_title}")
             
             if new_title:
-                self.db.update_conversation(conv_id, title=new_title)
+                self.metadata_db.update_conversation(conv_id, title=new_title)
                 print(f"DEBUG - Updated conversation {conv_id} with new title: {new_title}")
             else:
                 print(f"DEBUG - No new title generated for conversation {conv_id}")
@@ -143,13 +154,13 @@ class ConversationManager:
             if current_conv and current_conv['title'] == "Unlabeled Chat":
                 # Process the rename immediately instead of queuing
                 print(f"DEBUG - Processing rename for conversation {current_conv['id']} before creating new chat")
-                messages = self.db.load_messages(current_conv['id'])
+                messages = self.metadata_db.load_messages(current_conv['id'])
                 print(f"DEBUG - Loaded {len(messages)} messages for rename")
                 new_title = self.generate_conversation_title(messages)
                 print(f"DEBUG - Generated new title: {new_title}")
                 
                 if new_title:
-                    self.db.update_conversation(current_conv['id'], title=new_title)
+                    self.metadata_db.update_conversation(current_conv['id'], title=new_title)
                     print(f"DEBUG - Updated conversation {current_conv['id']} with new title: {new_title}")
             
             # Create new conversation and reset state
@@ -203,7 +214,7 @@ class ConversationManager:
                     # Title editing
                     new_title = st.text_input("Title", value=conv['title'], key=f"title_{conv['id']}")
                     if new_title != conv['title']:
-                        self.db.update_conversation(conv['id'], title=new_title)
+                        self.metadata_db.update_conversation(conv['id'], title=new_title)
                         st.rerun()
                     
                     # Training data flags
@@ -212,14 +223,14 @@ class ConversationManager:
                         if st.button("❎ Training" if not conv['is_flagged_for_training'] else "✅ Training", 
                                    key=f"flag_{conv['id']}", 
                                    type="secondary"):
-                            self.db.update_conversation(conv['id'], is_flagged=not conv['is_flagged_for_training'])
+                            self.metadata_db.update_conversation(conv['id'], is_flagged=not conv['is_flagged_for_training'])
                             st.rerun()
                     
                     with col2:
                         if st.button("🗑️ Archive" if not conv['is_archived'] else "📥 Restore",
                                    key=f"arch_{conv['id']}", 
                                    type="secondary"):
-                            self.db.update_conversation(conv['id'], is_archived=not conv['is_archived'])
+                            self.metadata_db.update_conversation(conv['id'], is_archived=not conv['is_archived'])
                             st.rerun()
                     
                     # Close options
@@ -231,14 +242,14 @@ class ConversationManager:
         """Add a message to the current conversation"""
         message = {"role": role, "content": content}
         st.session_state.db_messages.append(message)
-        self.db.log_message(message, st.session_state.current_conversation_id)
+        self.metadata_db.log_message(message, st.session_state.current_conversation_id)
         st.session_state.llm_handler.add_message(role, content)
         self.log(role, content)
 
     def _initialize_new_conversation(self, title="Unlabeled Chat"):
         """Initialize a new conversation with common setup code"""
         # Create new conversation
-        conv_id = self.db.create_conversation(title)
+        conv_id = self.metadata_db.create_conversation(title)
         if conv_id is None:
             return None
             
@@ -248,7 +259,7 @@ class ConversationManager:
         sess.db_messages = []
         # Pass model name from environment, defaulting if not set
         openai_model_name = os.environ.get("OPENAI_MODEL_NAME") # LLMHandler will apply its own default if this is None
-        sess.llm_handler = LLMHandler(sess.prompts, self.db, model_name=openai_model_name)
+        sess.llm_handler = LLMHandler(sess.prompts, self.metadata_db, model_name=openai_model_name)
         
         # Add system prompt as first message
         system_prompt = sess.llm_handler.get_system_prompt()
@@ -267,7 +278,7 @@ class ConversationManager:
         os.makedirs(export_dir, exist_ok=True)
         
         # Get all conversations flagged for training
-        conversations = self.db.get_conversations(include_archived=True)
+        conversations = self.metadata_db.get_conversations(include_archived=True)
         exported_count = 0
         
         for conv in conversations:
@@ -275,7 +286,7 @@ class ConversationManager:
                 continue
                 
             # Load messages for this conversation
-            messages = self.db.load_messages(conv['id'])
+            messages = self.metadata_db.load_messages(conv['id'])
             if not messages:
                 continue
                 
@@ -334,7 +345,7 @@ class ConversationManager:
         # --- Check for required prompt files --- END --- 
         
         # Get existing conversations
-        conversations = self.db.get_conversations()
+        conversations = self.metadata_db.get_conversations()
         
         # Only create a new conversation if there are none
         if not conversations:
@@ -366,4 +377,4 @@ class ConversationManager:
             if 'prompts' not in sess:
                 sess.prompts = get_prompts(sess.config_base_path)
             openai_model_name = os.environ.get("OPENAI_MODEL_NAME")
-            sess.llm_handler = LLMHandler(sess.prompts, self.db, model_name=openai_model_name) 
+            sess.llm_handler = LLMHandler(sess.prompts, self.metadata_db, model_name=openai_model_name) 

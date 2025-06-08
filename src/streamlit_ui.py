@@ -4,7 +4,6 @@ import re
 import traceback
 import sys
 
-import duckdb
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -23,7 +22,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
 
 from .prompt_loader import get_prompts
-from .database import Database
+from .metadata_database import MetadataDatabase
+from .analytic_factory import create_analytic_database, get_available_database_types
 from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
@@ -233,7 +233,7 @@ def display_figure_item(item, idx, sess, db):
         else:
             st.error("Missing SQL for figure dataframe regeneration")
 
-def display_message(idx, message, sess, db):
+def display_message(idx, message, sess, analytic_db, metadata_db):
     """Display a chat message with its components"""
     with st.chat_message(message["role"], avatar=avatars.get(message["role"])):
         # In dev mode, show raw content and trim button in columns
@@ -251,7 +251,7 @@ def display_message(idx, message, sess, db):
                 with col2:
                     if st.button("✂️ Trim", key=f"trim_{idx}", use_container_width=True):
                         # Get message ID from database
-                        results = db.conn.execute("""
+                        results = metadata_db.conn.execute("""
                             SELECT id 
                             FROM pet_meta.message_log 
                             WHERE conversation_id = ? 
@@ -261,9 +261,9 @@ def display_message(idx, message, sess, db):
                         
                         if results:
                             message_id = results[0]
-                            if db.trim_conversation_after_message(sess.current_conversation_id, message_id):
+                            if metadata_db.trim_conversation_after_message(sess.current_conversation_id, message_id):
                                 # Reload conversation
-                                sess.db_messages = db.load_messages(sess.current_conversation_id)
+                                sess.db_messages = metadata_db.load_messages(sess.current_conversation_id)
                                 sess.llm_handler.messages = []  # Reset LLM history
                                 # Reload messages into LLM handler
                                 for msg in sess.db_messages:
@@ -303,11 +303,11 @@ def display_message(idx, message, sess, db):
 
             if "dataframe" in msg:
                 for item in msg["dataframe"]:
-                    display_dataframe_item(item, idx, sess, db)
+                    display_dataframe_item(item, idx, sess, analytic_db)
 
             if "figure" in msg:
                 for item in msg["figure"]:
-                    display_figure_item(item, idx, sess, db)
+                    display_figure_item(item, idx, sess, analytic_db)
 
             if "metadata" in msg:
                 for item in msg["metadata"]:
@@ -370,7 +370,7 @@ def has_error_tag(message_content: str) -> bool:
     # So we just need to check for the presence of the tag itself.
     return "<error>" in message_content.lower() # Check for the opening tag, case-insensitive
 
-def process_sql_query(sql_tuple, db):
+def process_sql_query(sql_tuple, analytic_db):
     """Process an SQL query and store results as a dataframe"""
     sess = st.session_state
     sql_idx, sql_item = sql_tuple
@@ -379,27 +379,16 @@ def process_sql_query(sql_tuple, db):
     print(f"DEBUG - Processing SQL query: {sql[:100]}...")
     msg_idx = len(sess.db_messages) - 1
     
-    # Get the full message content for table description
-    message_content = sess.db_messages[msg_idx]["content"]
-    
-    # Extract table name from SQL for CREATE TABLE statements
-    create_table_match = re.search(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
-    description = None
-    if create_table_match:
-        table_name = create_table_match.group(1)
-        # Parse message elements
-        elements = get_elements(message_content)
-        # Look for a table description with matching table attribute
-        if "table_description" in elements:
-            for desc in elements["table_description"]:
-                if desc["attributes"].get("table") == table_name:
-                    description = desc["content"]
-                    print(f"DEBUG - Found description for table {table_name}: {description}")
-                    break
+    # Check if analytic database is available
+    if not analytic_db:
+        error_msg = "No analytic database configured. Please configure a database connection to run SQL queries."
+        print(f"ERROR - {error_msg}")
+        conv_manager.add_message(role=USER_ROLE, content=f"<error>\n{error_msg}\n</error>\n")
+        return True
     
     # Execute query and handle errors
     print(f"DEBUG - Executing SQL query with msg_idx={msg_idx}, sql_idx={sql_idx}")
-    df, err = db.execute_query(sql, description=description)
+    df, err = analytic_db.execute_query(sql)
     if err:
         print(f"DEBUG - SQL execution error: {err}")
         conv_manager.add_message(role=USER_ROLE, content=f"<error>\n{err}\n</error>\n")
@@ -651,49 +640,38 @@ def main():
             else:
                  sess.env_loaded = False
     
-        # 3. Determine and store effective app mode
-        # This check uses os.environ, which should now be populated by load_dotenv
-        if 'effective_app_mode' not in sess:
-            if os.environ.get("POSTGRES_CONN_STR"):
-                sess.effective_app_mode = "postgres_enabled"
-            elif sess.config_base_path != os.path.abspath(".") and os.environ.get("DUCKDB_FILE"): # LISTPET_BASE was set
-                sess.effective_app_mode = "duckdb_custom_path"
-            else:
-                sess.effective_app_mode = "duckdb_default_path"
-            print(f"DEBUG - Effective Application Mode set to: {sess.effective_app_mode}")
+        # 3. Create database instances
+        if 'metadata_db' not in sess:
+            conversation_file = os.environ.get("DUCKDB_CONVERSATION_FILE")
+            if not conversation_file:
+                st.error("DUCKDB_CONVERSATION_FILE environment variable is required")
+                st.stop()
+            
+            conversation_path = os.path.join(sess.config_base_path, conversation_file)
+            os.makedirs(os.path.dirname(conversation_path), exist_ok=True)
+            
+            sess.metadata_db = MetadataDatabase(conversation_path)
+            sess.metadata_db.initialize_schema()
+            print(f"DEBUG - MetadataDatabase initialized: {conversation_path}")
 
-        # 4. Database connection (if DuckDB), Database instance, and ConversationManager instance
-        db_file_path = None # Initialize for clarity
-        if sess.effective_app_mode == "duckdb_custom_path":
-            custom_db_file = os.environ.get("DUCKDB_FILE", "list_pet.db") # Default if not set
-            if os.path.isabs(custom_db_file):
-                db_file_path = custom_db_file
+        if 'analytic_db' not in sess:
+            # Try PostgreSQL first, then DuckDB
+            postgres_conn_str = os.environ.get("POSTGRES_CONN_STR")
+            analytic_file = os.environ.get("DUCKDB_ANALYTIC_FILE")
+            
+            if postgres_conn_str:
+                sess.analytic_db = create_analytic_database("postgresql", postgres_conn_str=postgres_conn_str)
+                print("DEBUG - Using PostgreSQL for analytic queries")
+            elif analytic_file:
+                analytic_path = os.path.join(sess.config_base_path, analytic_file)
+                sess.analytic_db = create_analytic_database("duckdb", duckdb_path=analytic_path)
+                print(f"DEBUG - Using DuckDB for analytic queries: {analytic_path}")
             else:
-                db_file_path = os.path.join(sess.config_base_path, custom_db_file)
-            print(f"DEBUG - Using DUCKDB_FILE (custom path): {db_file_path}")
-            db_dir = os.path.dirname(db_file_path)
-            if db_dir: # Ensure directory exists if custom_db_file includes a path
-                 os.makedirs(db_dir, exist_ok=True)
-
-        elif sess.effective_app_mode == "duckdb_default_path":
-            db_directory = os.path.join(sess.config_base_path, "db")
-            os.makedirs(db_directory, exist_ok=True)
-            db_file_path = os.path.join(db_directory, "list_pet.db")
-            print(f"DEBUG - DuckDB database path set to (default): {db_file_path}")
-        
-        if sess.effective_app_mode != "postgres_enabled" and db_file_path:
-            if 'conn' not in sess: # Connect DuckDB only once if not using Postgres
-                 sess.conn = duckdb.connect(db_file_path)
-                 print(f"DEBUG - Connected to DuckDB: {db_file_path}")
-        
-        # Instantiate DB and ConvManager, store in session state
-        if 'db' not in sess:
-            sess.db = Database() # Database() should handle its own connection logic (e.g. for Postgres using env var)
-            sess.db.initialize_pet_meta_schema() # This might use sess.conn if db is DuckDB
-            print("DEBUG - Database object initialized and schema checked/created.")
+                st.error("Either POSTGRES_CONN_STR or DUCKDB_ANALYTIC_FILE environment variable is required")
+                st.stop()
 
         if 'conv_manager' not in sess:
-            sess.conv_manager = ConversationManager(sess.db)
+            sess.conv_manager = ConversationManager(sess.metadata_db)
             sess.conv_manager.init_session_state() # Initializes sess.db_messages, etc.
             print("DEBUG - ConversationManager initialized.")
 
@@ -701,9 +679,9 @@ def main():
         print("DEBUG - One-time application initialization complete.")
 
     # Retrieve/assign core objects from session state for use in this run
-    # This ensures that global conv_manager and local db_instance point to the persistent session objects
+    # This ensures that global conv_manager and local analytic_db_instance point to the persistent session objects
     conv_manager = sess.conv_manager 
-    db_instance = sess.db
+    analytic_db_instance = sess.analytic_db
 
     # Add CSS styles
     st.markdown(CODE_WRAP_STYLE, unsafe_allow_html=True)
@@ -722,7 +700,7 @@ def main():
         # Skip system message (first message) if not in dev mode
         if idx == 0 and not sess.dev_mode:
             continue
-        display_message(idx, message, sess, db_instance) # Pass session-managed db_instance
+        display_message(idx, message, sess, analytic_db_instance, sess.metadata_db) # Pass both databases
 
     # Check if the last AI message proposes continuation
     show_continue_ai_plan_button = False
@@ -731,15 +709,9 @@ def main():
     if sess.db_messages:
         last_message = sess.db_messages[-1]
         last_message_content = last_message["content"]
-        
-        # Debug output
-        print(f"DEBUG - Last message role: {last_message['role']}")
-        print(f"DEBUG - Last message contains continuation tag: {has_continuation_proposal(last_message_content)}")
-        print(f"DEBUG - Last message content: {last_message_content[:200]}...")  # Show first 200 chars
-        
+                
         # Check for continuation proposal in any recent assistant message
         found_continuation = find_continuation_proposal(sess.db_messages)
-        print(f"DEBUG - Found continuation proposal in recent messages: {found_continuation}")
         
         if found_continuation:
             show_continue_ai_plan_button = True
@@ -757,7 +729,7 @@ def main():
 
     if sess.pending_sql and sess.pending_sql[0]:
         sql_tuple = sess.pending_sql.pop(0)
-        if process_sql_query(sql_tuple, db_instance): # Pass session-managed db_instance
+        if process_sql_query(sql_tuple, analytic_db_instance): # Pass session-managed analytic_db_instance
             st.rerun()
 
     if sess.pending_chart and sess.pending_chart[0]:
@@ -800,8 +772,7 @@ def main():
             processed_input = "<sql>\n" + user_chat_input + "\n</sql>\n"
         
         sess.conv_manager.add_message(role=USER_ROLE, content=processed_input) # Use session state instance
-        
-        
+             
         # Check for SQL in input
         msg = get_elements(processed_input)
         if msg.get("sql"):
