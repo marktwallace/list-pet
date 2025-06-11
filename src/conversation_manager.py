@@ -2,6 +2,7 @@ from datetime import datetime
 import os
 import streamlit as st
 import sys
+import subprocess
 
 from .metadata_database import MetadataDatabase
 from .llm_handler import LLMHandler
@@ -169,6 +170,27 @@ class ConversationManager:
                 return
             st.rerun()
         
+        # ETL button (only show if RUN_ETL_PIPELINE is configured)
+        if os.environ.get("RUN_ETL_PIPELINE"):
+            if st.sidebar.button("🔄 Run ETL", key="run-etl-button", type="secondary", use_container_width=True):
+                with st.spinner("Running ETL pipeline..."):
+                    self.run_etl_pipeline()
+                st.rerun()
+            
+            # Show last ETL result if available
+            if 'etl_last_result' in st.session_state:
+                result = st.session_state.etl_last_result
+                col1, col2 = st.sidebar.columns([4, 1])
+                with col1:
+                    if result["success"]:
+                        st.success(f"{result['message']} (at {result['timestamp']})")
+                    else:
+                        st.error(f"{result['message']} (at {result['timestamp']})")
+                with col2:
+                    if st.button("×", key="dismiss-etl-result", help="Dismiss ETL result"):
+                        del st.session_state.etl_last_result
+                        st.rerun()
+        
         # Display conversations
         if not conversations:
             st.sidebar.info("No conversations found")
@@ -220,7 +242,7 @@ class ConversationManager:
                     # Training data flags
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("❎ Training" if not conv['is_flagged_for_training'] else "✅ Training", 
+                        if st.button("☐ Training" if not conv['is_flagged_for_training'] else "✅ Training", 
                                    key=f"flag_{conv['id']}", 
                                    type="secondary"):
                             self.metadata_db.update_conversation(conv['id'], is_flagged=not conv['is_flagged_for_training'])
@@ -272,10 +294,21 @@ class ConversationManager:
 
     def export_training_data(self):
         """Export conversations flagged for training to text files."""
-        # Create timestamped directory
+        # Get base path from session state
+        base_path = st.session_state.get('config_base_path', '.')
+        
+        # Create timestamped directory under training/
         timestamp = datetime.now().strftime('%m-%d-%H-%M')
-        export_dir = f"training/{timestamp}"
+        export_dir = os.path.join(base_path, "training", timestamp)
         os.makedirs(export_dir, exist_ok=True)
+        
+        # Get system prompt for separate file
+        system_prompt = st.session_state.llm_handler.get_system_prompt()
+        
+        # Write system prompt to separate file
+        system_prompt_path = os.path.join(export_dir, "System Prompt.txt")
+        with open(system_prompt_path, 'w', encoding='utf-8') as f:
+            f.write(system_prompt)
         
         # Get all conversations flagged for training
         conversations = self.metadata_db.get_conversations(include_archived=True)
@@ -294,8 +327,12 @@ class ConversationManager:
             filename = f"{conv['title']}.txt"
             filepath = os.path.join(export_dir, filename)
             
-            with open(filepath, 'w') as f:
-                for msg in messages:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                for idx, msg in enumerate(messages):
+                    # Skip the first message if it's a system message
+                    if idx == 0 and msg['role'] == 'system':
+                        continue
+                    
                     # Write role on its own line
                     f.write(f"{msg['role'].capitalize()}:\n")
                     # Write message content
@@ -304,6 +341,111 @@ class ConversationManager:
             exported_count += 1
             
         return exported_count, timestamp
+
+    def run_etl_pipeline(self):
+        """Execute the ETL pipeline as a subprocess with logging."""
+        # Get ETL command from environment
+        etl_command = os.environ.get("RUN_ETL_PIPELINE")
+        if not etl_command:
+            st.error("RUN_ETL_PIPELINE environment variable not set")
+            return False
+        
+        # Get base path from session state
+        base_path = st.session_state.get('config_base_path', '.')
+        
+        # Create logs directory
+        logs_dir = os.path.join(base_path, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        
+        # Generate timestamped log filename
+        timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M')
+        log_file = os.path.join(logs_dir, f"{timestamp}.log")
+        
+        try:
+            # Close analytic database connection to avoid conflicts
+            if hasattr(st.session_state, 'analytic_db') and st.session_state.analytic_db:
+                st.session_state.analytic_db.close()
+                print(f"DEBUG - Closed analytic database connection for ETL")
+            
+            # Split command and run ETL
+            cmd_parts = etl_command.split()
+            print(f"DEBUG - Running ETL command: {cmd_parts} in directory: {base_path}")
+            
+            with open(log_file, 'w') as log_f:
+                result = subprocess.run(
+                    cmd_parts,
+                    cwd=base_path,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=300  # 5 minute timeout
+                )
+            
+            if result.returncode == 0:
+                print(f"DEBUG - ETL pipeline completed successfully, log: {log_file}")
+                st.session_state.etl_last_result = {
+                    "success": True,
+                    "message": f"✅ ETL pipeline completed successfully! Log: {log_file}",
+                    "timestamp": datetime.now().strftime('%H:%M:%S')
+                }
+                
+                # Reconnect to analytic database
+                self._reconnect_analytic_database()
+                return True
+            else:
+                print(f"ERROR - ETL pipeline failed with return code {result.returncode}")
+                st.session_state.etl_last_result = {
+                    "success": False,
+                    "message": f"❌ ETL pipeline failed (exit code: {result.returncode}). Check log: {log_file}",
+                    "timestamp": datetime.now().strftime('%H:%M:%S')
+                }
+                return False
+                
+        except subprocess.TimeoutExpired:
+            st.session_state.etl_last_result = {
+                "success": False,
+                "message": f"❌ ETL pipeline timed out after 5 minutes. Check log: {log_file}",
+                "timestamp": datetime.now().strftime('%H:%M:%S')
+            }
+            return False
+        except Exception as e:
+            print(f"ERROR - ETL execution error: {str(e)}")
+            st.session_state.etl_last_result = {
+                "success": False,
+                "message": f"❌ Error running ETL pipeline: {str(e)}",
+                "timestamp": datetime.now().strftime('%H:%M:%S')
+            }
+            return False
+        finally:
+            # Always try to reconnect the analytic database
+            if not hasattr(st.session_state, 'analytic_db') or not st.session_state.analytic_db:
+                self._reconnect_analytic_database()
+
+    def _reconnect_analytic_database(self):
+        """Reconnect to the analytic database after ETL completion."""
+        try:
+            # Import here to avoid circular imports
+            from .analytic_factory import create_analytic_database
+            
+            base_path = st.session_state.get('config_base_path', '.')
+            
+            # Recreate analytic database connection using same logic as main()
+            postgres_conn_str = os.environ.get("POSTGRES_CONN_STR")
+            analytic_file = os.environ.get("DUCKDB_ANALYTIC_FILE")
+            
+            if postgres_conn_str:
+                st.session_state.analytic_db = create_analytic_database("postgresql", postgres_conn_str=postgres_conn_str)
+                print("DEBUG - Reconnected to PostgreSQL for analytic queries")
+            elif analytic_file:
+                analytic_path = os.path.join(base_path, analytic_file)
+                st.session_state.analytic_db = create_analytic_database("duckdb", duckdb_path=analytic_path)
+                print(f"DEBUG - Reconnected to DuckDB for analytic queries: {analytic_path}")
+            else:
+                st.error("Cannot reconnect: Neither POSTGRES_CONN_STR nor DUCKDB_ANALYTIC_FILE is set")
+                
+        except Exception as e:
+            st.error(f"Failed to reconnect to analytic database: {str(e)}")
+            print(f"ERROR - Database reconnection failed: {str(e)}")
 
     def init_session_state(self):
         """Initialize session state with a new conversation"""
