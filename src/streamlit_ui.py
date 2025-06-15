@@ -3,6 +3,9 @@ import os
 import re
 import traceback
 import sys
+import atexit
+import signal
+import base64
 
 import streamlit as st
 import pandas as pd
@@ -66,10 +69,17 @@ def validate_element_indices(attributes, required_attrs, element_type="element")
             st.error(f"Error processing {desc} indices: {str(e)}")
             return None, None
 
-def update_dataframe_mapping(sess, sql: str, dataframe_key: str) -> str:
+def update_dataframe_mapping(sess, sql: str, dataframe_key: str) -> tuple[str, str]:
     """
     Extract table name from SQL and update the latest_dataframes mapping.
-    Returns the new dataframe name.
+    
+    Returns a tuple of (table_name, dataframe_name):
+    - table_name: The base name from the SQL 'FROM' clause (e.g., 'dim_users').
+      This is used for the 'table' attribute in <dataframe> tags and for chart lookups.
+      It should *not* contain a numeric suffix.
+    - dataframe_name: A unique identifier for the dataframe in the session,
+      including a suffix (e.g., 'dim_users_1'). This is used for the 'name'
+      attribute in <dataframe> tags and as the key in st.session_state.
     """
     # Extract table name from SQL. If no FROM clause, default to "metadata".
     table_match = re.search(r"FROM\s+(\w+(?:\.\w+)?)", sql, re.IGNORECASE)
@@ -83,7 +93,7 @@ def update_dataframe_mapping(sess, sql: str, dataframe_key: str) -> str:
     
     dataframe_name = f"{table_name}_{sess.table_counters[table_name]}"
     sess.latest_dataframes[table_name] = dataframe_name
-    return dataframe_name
+    return table_name, dataframe_name
 
 def handle_regenerate_button(button_key, sql, db, dataframe_key):
     """Handle regeneration button for dataframes and figures"""
@@ -413,7 +423,7 @@ def process_sql_query(sql_tuple, analytic_db):
     print(f"DEBUG - SQL execution processing, df is {'None' if df is None else ('empty' if df.empty else 'DataFrame with data')}")
         
     # Update dataframe mapping and get new name
-    dataframe_name = update_dataframe_mapping(sess, sql, None)
+    table_name, dataframe_name = update_dataframe_mapping(sess, sql, None)
     
     # Store dataframe in session state
     dataframe_key = f"dataframe_{dataframe_name}"
@@ -423,7 +433,9 @@ def process_sql_query(sql_tuple, analytic_db):
     tsv_lines = _format_dataframe_preview_for_llm(df)
     
     # Create and add dataframe message
-    content = f'<dataframe name="{dataframe_name}" table="{dataframe_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
+    # IMPORTANT: The `table` attribute must be the base table name from the SQL
+    # `FROM` clause, while the `name` attribute is the unique suffixed name.
+    content = f'<dataframe name="{dataframe_name}" table="{table_name}" sql_msg_idx="{msg_idx}" sql_tag_idx="{sql_idx}" >\n'
     content += "\n".join(tsv_lines) + "\n</dataframe>\n"
     
     print(f"DEBUG - Adding dataframe with name: {dataframe_name}")
@@ -571,7 +583,9 @@ def process_python_code(python_tuple):
         tsv_lines = _format_dataframe_preview_for_llm(result.dataframe)
         
         # Create dataframe message
-        content = f'<dataframe name="{dataframe_name}" table="{dataframe_name}" python_msg_idx="{msg_idx}" python_tag_idx="{python_idx}" >\n'
+        # IMPORTANT: The `table` attribute is the base name for the output,
+        # while `name` is the unique suffixed name for session state.
+        content = f'<dataframe name="{dataframe_name}" table="{base_name}" python_msg_idx="{msg_idx}" python_tag_idx="{python_idx}" >\n'
         content += "\n".join(tsv_lines) + "\n</dataframe>\n"
         conv_manager.add_message(role=USER_ROLE, content=content)
     
@@ -600,46 +614,66 @@ def generate_llm_response():
     sess.pending_python = list(enumerate(msg.get("python", [])))
     return True
 
+def cleanup_resources():
+    """Cleanup function to be called on exit"""
+    print("DEBUG - Cleaning up resources...")
+    sess = st.session_state
+    if hasattr(sess, 'analytic_db') and sess.analytic_db:
+        sess.analytic_db.close()
+        print("DEBUG - Closed analytic database connection")
+    if hasattr(sess, 'metadata_db') and sess.metadata_db:
+        sess.metadata_db.conn.close()
+        print("DEBUG - Closed metadata database connection")
+
 def main():
-    st.set_page_config(page_title="List Pet", page_icon="🐾", layout="wide")
+    sess = st.session_state
+
+    # Initialize environment and load settings.env on first run.
+    # This must happen before st.set_page_config.
+    if 'config_base_path' not in sess:
+        config_base_env_var = os.environ.get("LISTPET_BASE")
+        if not config_base_env_var:
+            st.error("LISTPET_BASE environment variable is required")
+            st.stop()
+        
+        sess.config_base_path = os.path.abspath(os.path.expanduser(config_base_env_var))
+        
+        settings_path = os.path.join(sess.config_base_path, "settings.env")
+        if os.path.exists(settings_path):
+            load_dotenv(dotenv_path=settings_path)
+            print(f"DEBUG - Loaded environment variables from: {settings_path}")
+        else:
+            st.error(f"settings.env not found at: {settings_path}")
+            st.stop()
+
+    # Get app display settings from environment or use defaults.
+    # These are loaded from settings.env in the initialization block below.
+    app_title = os.environ.get("APP_TITLE", "List Pet")
+    app_caption = os.environ.get("APP_CAPTION", "Your friendly SQL assistant")
+    app_icon_setting = os.environ.get("APP_ICON", "🐾")
+
+    # The page config must be the first Streamlit command.
+    # We will determine the icon (emoji or path) before setting it.
+    # The actual loading of the .env file happens in the one-time init block.
+    # If this is the first run and the .env hasn't been loaded, it will use defaults,
+    # and a rerun will be triggered by the init, which will then have the env vars.
+    st.set_page_config(page_title=app_title, page_icon=app_icon_setting, layout="wide")
+
+    # Register cleanup on exit, but only once per session
+    if 'cleanup_registered' not in sess:
+        atexit.register(cleanup_resources)
+        sess.cleanup_registered = True
+        print("DEBUG - atexit cleanup handler registered.")
     
-    sess = st.session_state # Get session state early
     global conv_manager # To assign to the global variable from session state
 
     if 'app_initialized' not in sess:
         print("DEBUG - Performing one-time application initialization...")
 
-        # 1. Determine config_base_path
-        if 'config_base_path' not in sess:
-            config_base_env_var = os.environ.get("LISTPET_BASE")
-            if config_base_env_var:
-                sess.config_base_path = os.path.abspath(os.path.expanduser(config_base_env_var))
-            else:
-                sess.config_base_path = os.path.abspath(".") # Default to project root
-            print(f"DEBUG - Using LISTPET_BASE: {sess.config_base_path}")
+        # The environment and config path are now set up before this block.
+        # We can proceed directly to initializing database connections.
+        print(f"DEBUG - Using LISTPET_BASE: {sess.config_base_path}")
 
-        # 2. Load environment variables from .env file at the config_base_path
-        dotenv_path = os.path.join(sess.config_base_path, ".env")
-        settings_dotenv_path = os.path.join(sess.config_base_path, "settings.env")
-
-        if os.path.exists(settings_dotenv_path):
-            load_dotenv(dotenv_path=settings_dotenv_path)
-            print(f"DEBUG - Loaded environment variables from: {settings_dotenv_path}")
-
-        if os.path.exists(dotenv_path):
-            load_dotenv(dotenv_path=dotenv_path, override=True)
-            print(f"DEBUG - Loaded environment variables from: {dotenv_path} (overriding where applicable)")
-            sess.env_loaded = True
-        else:
-            print(f"DEBUG - .env file not found at: {dotenv_path}")
-            # sess.env_loaded remains False if only settings.env was loaded,
-            # or becomes True if .env was also found.
-            # We can consider settings.env to contribute to env_loaded status.
-            if os.path.exists(settings_dotenv_path):
-                 sess.env_loaded = True
-            else:
-                 sess.env_loaded = False
-    
         # 3. Create database instances
         if 'metadata_db' not in sess:
             conversation_file = os.environ.get("DUCKDB_CONVERSATION_FILE")
@@ -655,20 +689,31 @@ def main():
             print(f"DEBUG - MetadataDatabase initialized: {conversation_path}")
 
         if 'analytic_db' not in sess:
-            # Try PostgreSQL first, then DuckDB
-            postgres_conn_str = os.environ.get("POSTGRES_CONN_STR")
-            analytic_file = os.environ.get("DUCKDB_ANALYTIC_FILE")
+            # Get database type from settings
+            db_type = os.environ.get("ANALYTIC_DATABASE")
+            if not db_type:
+                st.error("ANALYTIC_DATABASE environment variable is required in settings.env")
+                st.stop()
+                
+            if db_type not in ["duckdb", "postgresql"]:
+                st.error(f"ANALYTIC_DATABASE must be either 'duckdb' or 'postgresql', got: {db_type}")
+                st.stop()
             
-            if postgres_conn_str:
+            if db_type == "postgresql":
+                postgres_conn_str = os.environ.get("POSTGRES_CONN_STR")
+                if not postgres_conn_str:
+                    st.error("POSTGRES_CONN_STR environment variable is required when ANALYTIC_DATABASE=postgresql")
+                    st.stop()
                 sess.analytic_db = create_analytic_database("postgresql", postgres_conn_str=postgres_conn_str)
                 print("DEBUG - Using PostgreSQL for analytic queries")
-            elif analytic_file:
+            else:  # duckdb
+                analytic_file = os.environ.get("DUCKDB_ANALYTIC_FILE")
+                if not analytic_file:
+                    st.error("DUCKDB_ANALYTIC_FILE environment variable is required when ANALYTIC_DATABASE=duckdb")
+                    st.stop()
                 analytic_path = os.path.join(sess.config_base_path, analytic_file)
                 sess.analytic_db = create_analytic_database("duckdb", duckdb_path=analytic_path)
                 print(f"DEBUG - Using DuckDB for analytic queries: {analytic_path}")
-            else:
-                st.error("Either POSTGRES_CONN_STR or DUCKDB_ANALYTIC_FILE environment variable is required")
-                st.stop()
 
         if 'conv_manager' not in sess:
             sess.conv_manager = ConversationManager(sess.metadata_db)
@@ -691,9 +736,46 @@ def main():
     # Render UI
     with st.sidebar:
         sess.conv_manager.render_sidebar() # Use session state instance directly
+        st.divider()
+        if st.button("🛑 Cleanup and Exit", type="secondary"):
+            print("DEBUG - Cleanup button pressed")
+            cleanup_resources()
+            st.stop()
     
-    st.title("🐾 List Pet")
-    st.caption("Your friendly SQL assistant")
+    # Determine icon for display in the title
+    title_icon_path = None
+    title_icon_emoji = app_icon_setting
+    if 'config_base_path' in sess and app_icon_setting != "🐾":
+        potential_icon_path = os.path.join(sess.config_base_path, app_icon_setting)
+        if os.path.exists(potential_icon_path):
+            title_icon_path = potential_icon_path
+            
+    # Display title with icon and caption
+    if title_icon_path:
+        try:
+            # Read image and encode in base64
+            with open(title_icon_path, "rb") as f:
+                image_bytes = f.read()
+            encoded = base64.b64encode(image_bytes).decode()
+
+            # Use HTML with flexbox for better alignment control.
+            # `align-items: flex-end` aligns items to the bottom of the container.
+            # The h1 styling is adjusted to better align with the image bottom.
+            st.markdown(f"""
+                <div style="display: flex; align-items: flex-end; gap: 12px;">
+                    <img src="data:image/png;base64,{encoded}" width="48">
+                    <h1 style="margin: 0; padding-bottom: 0.1em;">{app_title}</h1>
+                </div>
+                """, unsafe_allow_html=True)
+
+        except (FileNotFoundError, IsADirectoryError):
+            # Fallback if icon path is invalid
+            st.error(f"Icon file not found or is a directory: {title_icon_path}")
+            st.title(f"{title_icon_emoji} {app_title}") # Fallback
+    else:
+        st.title(f"{title_icon_emoji} {app_title}")
+
+    st.caption(app_caption)
 
     # Display chat messages
     for idx, message in enumerate(sess.db_messages):

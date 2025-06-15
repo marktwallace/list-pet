@@ -38,6 +38,7 @@ from pathlib import Path
 from minio import Minio
 import socket
 import atexit
+import signal
 
 @dataclass
 class ExecutionResult:
@@ -71,6 +72,7 @@ class MinioWrapper:
             
         # Register cleanup on exit
         atexit.register(self._cleanup)
+        print("DEBUG - MinIO wrapper initialized and cleanup registered")
         
     def _get_data_dir(self) -> Path:
         """Get the data directory path, creating it if needed"""
@@ -127,11 +129,23 @@ class MinioWrapper:
     def _cleanup(self):
         """Cleanup when the program exits"""
         if self.server_process:
-            self.server_process.terminate()
+            print("DEBUG - Stopping MinIO server...")
             try:
-                self.server_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.server_process.kill()
+                # Try graceful shutdown first
+                self.server_process.terminate()
+                try:
+                    self.server_process.wait(timeout=5)
+                    print("DEBUG - MinIO server stopped gracefully")
+                except subprocess.TimeoutExpired:
+                    print("DEBUG - MinIO server did not stop gracefully, forcing...")
+                    self.server_process.kill()
+                    self.server_process.wait()
+                    print("DEBUG - MinIO server force stopped")
+            except Exception as e:
+                print(f"ERROR - Failed to stop MinIO server: {str(e)}")
+            finally:
+                self.server_process = None
+                print("DEBUG - MinIO server cleanup complete")
         
     def get(self, path: str) -> str:
         """Get contents of a file from MinIO as a string"""

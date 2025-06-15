@@ -6,7 +6,7 @@ from .duckdb_analytic import DuckDBAnalytic
 from .postgresql_analytic import PostgreSQLAnalytic
 
 def create_analytic_database(
-    db_type: str = "auto",
+    db_type: str,
     duckdb_path: Optional[str] = None,
     postgres_conn_str: Optional[str] = None
 ) -> Optional[AnalyticDatabase]:
@@ -14,24 +14,13 @@ def create_analytic_database(
     Factory function to create appropriate analytic database instance.
     
     Args:
-        db_type: Type of database ("duckdb", "postgresql", or "auto")
+        db_type: Type of database ("duckdb" or "postgresql")
         duckdb_path: Path to DuckDB file (required for DuckDB)
         postgres_conn_str: PostgreSQL connection string (required for PostgreSQL)
         
     Returns:
         AnalyticDatabase instance or None if creation failed
     """
-    
-    if db_type == "auto":
-        # Auto-detect based on available configuration
-        if postgres_conn_str or os.environ.get("POSTGRES_CONN_STR"):
-            db_type = "postgresql"
-        elif duckdb_path:
-            db_type = "duckdb"
-        else:
-            print("DEBUG - No analytic database configuration found")
-            return None
-    
     try:
         if db_type == "duckdb":
             if not duckdb_path:
@@ -40,11 +29,10 @@ def create_analytic_database(
             return DuckDBAnalytic(duckdb_path)
             
         elif db_type == "postgresql":
-            conn_str = postgres_conn_str or os.environ.get("POSTGRES_CONN_STR")
-            if not conn_str:
+            if not postgres_conn_str:
                 print("ERROR - PostgreSQL connection string is required for PostgreSQL analytic database")
                 return None
-            return PostgreSQLAnalytic(conn_str)
+            return PostgreSQLAnalytic(postgres_conn_str)
             
         else:
             print(f"ERROR - Unsupported analytic database type: {db_type}")

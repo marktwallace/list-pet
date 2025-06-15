@@ -12,4 +12,7 @@ gatherUsageStats = true
 
 # Port settings (optional)
 # port = 8501
-# address = "localhost" 
+# address = "localhost"
+
+[client]
+toolbarMode = "viewer" 
