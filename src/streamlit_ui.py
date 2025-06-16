@@ -505,62 +505,30 @@ def display_message(idx, message, sess, analytic_db, metadata_db):
                         with st.expander(title_text(item["content"]), expanded=False):
                             st.code(item["content"])
                 
-                # Add styled buttons using Streamlit columns and session state
-                score = message.get('feedback_score', 0)
-                content_to_copy = message['content']
-                
+                # Create a row of action buttons (👍, 👎, ✏️) laid out with Streamlit columns.
+                cols = st.columns([0.1, 0.1, 0.1, 1])
 
-                
-                # Create button row with proper spacing
-                cols = st.columns([0.1, 0.1, 0.1, 0.1, 1])
-                
+                # --- THUMBS UP ---
                 with cols[0]:
-                    if st.button("📋", key=f"copy_{idx}", help="Copy message content", type="secondary"):
-                        # Simple transparent copy attempt
-                        st.session_state[f"copy_content_{idx}"] = content_to_copy
-                
-                with cols[1]:
-                    up_type = "primary" if score == 1 else "secondary"
+                    up_type = "primary" if message.get('feedback_score', 0) == 1 else "secondary"
                     if st.button("👍", key=f"thumbs_up_{idx}", help="Thumbs up", type=up_type):
-                        new_score = 0 if score == 1 else 1
+                        new_score = 0 if message.get('feedback_score', 0) == 1 else 1
                         metadata_db.update_feedback_score(message['id'], new_score)
                         _reload_and_rerun(sess, metadata_db)
-                
-                with cols[2]:
-                    down_type = "primary" if score == -1 else "secondary"
+
+                # --- THUMBS DOWN ---
+                with cols[1]:
+                    down_type = "primary" if message.get('feedback_score', 0) == -1 else "secondary"
                     if st.button("👎", key=f"thumbs_down_{idx}", help="Thumbs down", type=down_type):
-                        new_score = 0 if score == -1 else -1
+                        new_score = 0 if message.get('feedback_score', 0) == -1 else -1
                         metadata_db.update_feedback_score(message['id'], new_score)
                         _reload_and_rerun(sess, metadata_db)
-                
-                with cols[3]:
+
+                # --- EDIT ---
+                with cols[2]:
                     if st.button("✏️", key=f"edit_{idx}", help="Edit message", type="secondary"):
                         sess.editing_message_id = message.get('id')
                         st.rerun()
-                
-                # Simple transparent copy attempt
-                if f"copy_content_{idx}" in st.session_state:
-                    content = st.session_state[f"copy_content_{idx}"]
-                    del st.session_state[f"copy_content_{idx}"]
-                    
-                    # Try a minimal JavaScript copy approach
-                    import json
-                    escaped_content = json.dumps(content)
-                    
-                    st.markdown(f"""
-                        <script>
-                        try {{
-                            if (navigator.clipboard && navigator.clipboard.writeText) {{
-                                navigator.clipboard.writeText({escaped_content});
-                            }}
-                        }} catch(e) {{
-                            // Fail silently
-                        }}
-                        </script>
-                    """, unsafe_allow_html=True)
-                    
-                    # Show brief feedback
-                    st.toast("Copy attempted", icon="📋")
 
 def _format_dataframe_preview_for_llm(df: pd.DataFrame) -> list[str]:
     """Formats a DataFrame into a TSV-like list of strings for LLM preview, with head/tail truncation."""
