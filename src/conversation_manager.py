@@ -264,10 +264,27 @@ class ConversationManager:
                         st.rerun()
 
     def add_message(self, role, content):
-        """Add a message to the current conversation"""
-        message = {"role": role, "content": content}
-        st.session_state.db_messages.append(message)
-        self.metadata_db.log_message(message, st.session_state.current_conversation_id)
+        """Add a message to the current conversation, log it, and update session state."""
+        message_to_log = {"role": role, "content": content}
+        
+        # Log the message to the database and get the new ID
+        new_id = self.metadata_db.log_message(message_to_log, st.session_state.current_conversation_id)
+        
+        if new_id is None:
+            # Handle logging failure
+            st.error("Failed to save message. Please try again.")
+            return
+
+        # Create the full message object for session state
+        message_for_session = {
+            "id": new_id,
+            "role": role,
+            "content": content,
+            "feedback_score": 0  # Default score for a new message
+        }
+
+        # Append to session state and log to file
+        st.session_state.db_messages.append(message_for_session)
         st.session_state.llm_handler.add_message(role, content)
         self.log(role, content)
 
@@ -617,6 +634,10 @@ class ConversationManager:
             sess.latest_dataframes = {}
         if "dev_mode" not in sess:
             sess.dev_mode = False
+        if "editing_message_id" not in sess:
+            sess.editing_message_id = None
+        if "pending_completion" not in sess:
+            sess.pending_completion = None
         if "llm_handler" not in sess:
             # Ensure prompts are loaded before LLMHandler initialization if it happens here
             if 'prompts' not in sess:

@@ -32,7 +32,7 @@ from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
 from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
-from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON, CONTINUE_AI_PLAN_BUTTON_STYLE, MESSAGE_ACTION_BUTTONS_STYLE
+from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON, CONTINUE_AI_PLAN_BUTTON_STYLE, ACTION_BUTTON_STYLES
 from .python_executor import execute_python_code
 
 # Constants for continuation tags
@@ -51,6 +51,92 @@ avatars = {
 def title_text(input):
     """Helper function to truncate titles"""
     return input if len(input) <= 120 else input[:117] + "..."
+
+def create_action_buttons_html(message_id, idx, current_score):
+    """Create custom HTML action buttons with proper styling and event handling"""
+    
+    # Determine button states
+    thumbs_up_class = "action-button selected" if current_score == 1 else "action-button"
+    thumbs_down_class = "action-button selected" if current_score == -1 else "action-button"
+    
+    # Create unique function names to avoid conflicts
+    copy_func = f"copyMessage_{idx}"
+    thumbs_up_func = f"thumbsUp_{idx}"
+    thumbs_down_func = f"thumbsDown_{idx}"
+    edit_func = f"editMessage_{idx}"
+    
+    html = f"""
+    <div style="display: flex; gap: 4px; align-items: center;">
+        <!-- Copy Button -->
+        <button class="copy-button" onclick="{copy_func}()" title="Copy message content">
+            📋
+        </button>
+        
+        <!-- Thumbs Up Button -->
+        <button class="{thumbs_up_class}" onclick="{thumbs_up_func}()" title="Thumbs up">
+            👍
+        </button>
+        
+        <!-- Thumbs Down Button -->
+        <button class="{thumbs_down_class}" onclick="{thumbs_down_func}()" title="Thumbs down">
+            👎
+        </button>
+        
+        <!-- Edit Button -->
+        <button class="action-button" onclick="{edit_func}()" title="Edit message">
+            ✏️
+        </button>
+    </div>
+    
+    <script>
+        // Copy message content
+        function {copy_func}() {{
+            const content = `{message_id}`;  // We'll pass the actual content
+            navigator.clipboard.writeText(content).then(() => {{
+                // Flash feedback
+                const btn = event.target;
+                const original = btn.innerHTML;
+                btn.innerHTML = '✅';
+                setTimeout(() => btn.innerHTML = original, 1000);
+            }}).catch(err => console.error('Copy failed:', err));
+        }}
+        
+        // Thumbs up
+        function {thumbs_up_func}() {{
+            const url = new URL(window.location);
+            url.searchParams.set('button_action', 'true');
+            url.searchParams.set('type', 'feedback');
+            url.searchParams.set('action', 'thumbs_up');
+            url.searchParams.set('messageId', '{message_id}');
+            url.searchParams.set('idx', '{idx}');
+            window.location.href = url.toString();
+        }}
+        
+        // Thumbs down  
+        function {thumbs_down_func}() {{
+            const url = new URL(window.location);
+            url.searchParams.set('button_action', 'true');
+            url.searchParams.set('type', 'feedback');
+            url.searchParams.set('action', 'thumbs_down');
+            url.searchParams.set('messageId', '{message_id}');
+            url.searchParams.set('idx', '{idx}');
+            window.location.href = url.toString();
+        }}
+        
+        // Edit message
+        function {edit_func}() {{
+            const url = new URL(window.location);
+            url.searchParams.set('button_action', 'true');
+            url.searchParams.set('type', 'edit');
+            url.searchParams.set('action', 'edit_message');
+            url.searchParams.set('messageId', '{message_id}');
+            url.searchParams.set('idx', '{idx}');
+            window.location.href = url.toString();
+        }}
+    </script>
+    """
+    
+    return html
 
 def validate_element_indices(attributes, required_attrs, element_type="element"):
     """
@@ -158,6 +244,44 @@ def get_figure_key(idx, dataframe_name, chart_content):
     content_hash = hash(chart_content) % 100000  # Keep it to 5 digits
     return f"figure_{idx}_{dataframe_name}_{content_hash}"
 
+def _reload_and_rerun(sess, metadata_db):
+    """Helper to reload conversation state from DB and trigger a rerun."""
+    sess.db_messages = metadata_db.load_messages(sess.current_conversation_id)
+    sess.llm_handler.messages = []
+    for msg in sess.db_messages:
+        sess.llm_handler.add_message(msg["role"], msg["content"])
+    st.rerun()
+
+def handle_button_message(message_data, metadata_db):
+    """Handle button click messages from HTML buttons"""
+    try:
+        if message_data.get('type') == 'feedback':
+            message_id = message_data.get('messageId')
+            action = message_data.get('action')
+            
+            if action == 'thumbs_up':
+                # Toggle thumbs up: 1 if not selected, 0 if already selected
+                current_score = metadata_db.get_feedback_score(message_id) or 0
+                new_score = 0 if current_score == 1 else 1
+                metadata_db.update_feedback_score(message_id, new_score)
+                _reload_and_rerun(st.session_state, metadata_db)
+                
+            elif action == 'thumbs_down':
+                # Toggle thumbs down: -1 if not selected, 0 if already selected
+                current_score = metadata_db.get_feedback_score(message_id) or 0
+                new_score = 0 if current_score == -1 else -1
+                metadata_db.update_feedback_score(message_id, new_score)
+                _reload_and_rerun(st.session_state, metadata_db)
+                
+        elif message_data.get('type') == 'edit':
+            message_id = message_data.get('messageId')
+            st.session_state.editing_message_id = message_id
+            st.rerun()
+            
+    except Exception as e:
+        st.error(f"Error handling button click: {str(e)}")
+        print(f"Button message error: {e}")
+
 def display_figure_item(item, idx, sess, db):
     """Display a figure element with its expander and regeneration button if needed"""
     content = item["content"]
@@ -245,142 +369,198 @@ def display_figure_item(item, idx, sess, db):
             st.error("Missing SQL for figure dataframe regeneration")
 
 def display_message(idx, message, sess, analytic_db, metadata_db):
-    """Display a chat message with its components"""
+    """Display a chat message with its components or an editor."""
+    is_editing = sess.editing_message_id is not None and sess.editing_message_id == message.get('id')
+
     with st.chat_message(message["role"], avatar=avatars.get(message["role"])):
-        # In dev mode, show raw content and trim button in columns
-        if sess.dev_mode:
-            col1, col2 = st.columns([5, 1])
-            with col1:
-                # For system messages, use a more descriptive expander title
-                expander_title = "System Prompt" if message["role"] == SYSTEM_ROLE else "Raw Message Content"
-                with st.expander(expander_title, expanded=False):
-                    # Use markdown with text wrapping
-                    st.markdown(f"```text\n{message['content']}\n```", unsafe_allow_html=True)
+        if is_editing:
+            # Render the editor UI
+            new_content = st.text_area(
+                "Edit message",
+                value=message['content'],
+                height=250,
+                key=f"editor_textarea_{message['id']}"
+            )
+
+            # Define columns for action buttons
+            num_buttons = 4 if message['role'] == ASSISTANT_ROLE else 3
+            cols = st.columns(num_buttons)
+
+            # Cancel button (common to both roles)
+            if cols[0].button("Cancel", key=f"cancel_{message['id']}"):
+                sess.editing_message_id = None
+                st.rerun()
+
+            # Save Only button (common to both roles)
+            if cols[1].button("Save Only", key=f"save_only_{message['id']}"):
+                metadata_db.update_message_content(message['id'], new_content)
+                sess.editing_message_id = None
+                _reload_and_rerun(sess, metadata_db)
             
-            # Only show trim button for non-system messages after the first message
-            if message["role"] != SYSTEM_ROLE and idx > 0:
-                with col2:
-                    if st.button("✂️ Trim", key=f"trim_{idx}", use_container_width=True):
-                        # Get message ID from database
-                        results = metadata_db.conn.execute("""
-                            SELECT id 
-                            FROM pet_meta.message_log 
-                            WHERE conversation_id = ? 
-                            ORDER BY id ASC
-                            LIMIT 1 OFFSET ?
-                        """, [sess.current_conversation_id, idx]).fetchone()
-                        
-                        if results:
-                            message_id = results[0]
-                            if metadata_db.trim_conversation_after_message(sess.current_conversation_id, message_id):
-                                # Reload conversation
-                                sess.db_messages = metadata_db.load_messages(sess.current_conversation_id)
-                                sess.llm_handler.messages = []  # Reset LLM history
-                                # Reload messages into LLM handler
-                                for msg in sess.db_messages:
-                                    sess.llm_handler.add_message(msg["role"], msg["content"])
-                                st.rerun()
+            # Role-specific buttons
+            if message['role'] == USER_ROLE:
+                if cols[2].button("Save & Regenerate", key=f"save_regen_{message['id']}"):
+                    metadata_db.update_message_content(message['id'], new_content)
+                    metadata_db.delete_subsequent_messages(sess.current_conversation_id, message['id'])
+                    sess.pending_response = True
+                    sess.editing_message_id = None
+                    _reload_and_rerun(sess, metadata_db)
+            elif message['role'] == ASSISTANT_ROLE:
+                if cols[2].button("Save & Rerun", key=f"save_rerun_{message['id']}"):
+                    metadata_db.update_message_content(message['id'], new_content)
+                    metadata_db.delete_subsequent_messages(sess.current_conversation_id, message['id'])
+                    
+                    # After deleting, the edited message is now the last one.
+                    # We re-parse it to set pending actions.
+                    edited_msg_elements = get_elements(new_content)
+                    sess.pending_sql = list(enumerate(edited_msg_elements.get("sql", [])))
+                    sess.pending_chart = list(enumerate(edited_msg_elements.get("chart", [])))
+                    sess.pending_python = list(enumerate(edited_msg_elements.get("python", [])))
+                    
+                    sess.editing_message_id = None
+                    _reload_and_rerun(sess, metadata_db)
+
+                if cols[3].button("Save & Complete", key=f"save_complete_{message['id']}"):
+                    metadata_db.update_message_content(message['id'], new_content)
+                    metadata_db.delete_subsequent_messages(sess.current_conversation_id, message['id'])
+                    sess.pending_completion = message['id']
+                    sess.editing_message_id = None
+                    _reload_and_rerun(sess, metadata_db)
+        else:
+            # Render the read-only view
+            # In dev mode, show raw content and trim button in columns
+            if sess.dev_mode:
+                # Ensure all messages have an ID, critical for editing
+                assert 'id' in message, f"Message at index {idx} is missing an ID."
+
+                col1, col2 = st.columns([5, 1])
+                with col1:
+                    # For system messages, use a more descriptive expander title
+                    expander_title = "System Prompt" if message["role"] == SYSTEM_ROLE else "Raw Message Content"
+                    with st.expander(expander_title, expanded=False):
+                        # Use markdown with text wrapping
+                        st.markdown(f"```text\n{message['content']}\n```", unsafe_allow_html=True)
+                
+                # Only show trim button for non-system messages after the first message
+                if message["role"] != SYSTEM_ROLE and idx > 0:
+                    with col2:
+                        if st.button("✂️ Trim", key=f"trim_{idx}", use_container_width=True):
+                            message_id = message.get('id')
+                            if message_id:
+                                if metadata_db.trim_conversation_after_message(sess.current_conversation_id, message_id):
+                                    # Reload conversation
+                                    sess.db_messages = metadata_db.load_messages(sess.current_conversation_id)
+                                    sess.llm_handler.messages = []  # Reset LLM history
+                                    # Reload messages into LLM handler
+                                    for msg in sess.db_messages:
+                                        sess.llm_handler.add_message(msg["role"], msg["content"])
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to trim conversation")
                             else:
-                                st.error("Failed to trim conversation")
-                        else:
-                            st.error("Could not find message ID for trimming")
-        
-        # Regular message display - only for non-system messages
-        if message["role"] != SYSTEM_ROLE:
-            msg = get_elements(message["content"])
+                                st.error("Could not find message ID for trimming")
             
-            if message["role"] == ASSISTANT_ROLE and "reasoning" in msg:
-                for item in msg["reasoning"]:
-                    with st.expander("Reasoning", expanded=False):
-                        st.markdown(item["content"])
-            
-            if "markdown" in msg:
-                st.markdown(msg["markdown"])
-            
-            if "sql" in msg:
-                for item in msg["sql"]:
-                    with st.expander(title_text(item["content"]), expanded=False):
-                        st.code(item["content"])
+            # Regular message display - only for non-system messages
+            if message["role"] != SYSTEM_ROLE:
+                msg = get_elements(message["content"])
+                
+                if message["role"] == ASSISTANT_ROLE and "reasoning" in msg:
+                    for item in msg["reasoning"]:
+                        with st.expander("Reasoning", expanded=False):
+                            st.markdown(item["content"])
+                
+                if "markdown" in msg:
+                    st.markdown(msg["markdown"])
+                
+                if "sql" in msg:
+                    for item in msg["sql"]:
+                        with st.expander(title_text(item["content"]), expanded=False):
+                            st.code(item["content"])
 
-            if "python" in msg:
-                for item in msg["python"]:
-                    with st.expander(title_text(item["content"]), expanded=False):
-                        st.code(item["content"], language="python")
+                if "python" in msg:
+                    for item in msg["python"]:
+                        with st.expander(title_text(item["content"]), expanded=False):
+                            st.code(item["content"], language="python")
 
-            if "chart" in msg: # Display raw chart configuration
-                for item in msg["chart"]:
-                    with st.expander(title_text(item["content"]), expanded=False):
-                        st.code(item["content"], language="yaml")
+                if "chart" in msg: # Display raw chart configuration
+                    for item in msg["chart"]:
+                        with st.expander(title_text(item["content"]), expanded=False):
+                            st.code(item["content"], language="yaml")
 
-            if "dataframe" in msg:
-                for item in msg["dataframe"]:
-                    display_dataframe_item(item, idx, sess, analytic_db)
+                if "dataframe" in msg:
+                    for item in msg["dataframe"]:
+                        display_dataframe_item(item, idx, sess, analytic_db)
 
-            if "figure" in msg:
-                for item in msg["figure"]:
-                    display_figure_item(item, idx, sess, analytic_db)
+                if "figure" in msg:
+                    for item in msg["figure"]:
+                        display_figure_item(item, idx, sess, analytic_db)
 
-            if "metadata" in msg:
-                for item in msg["metadata"]:
-                    with st.expander("Metadata", expanded=True):
-                        st.code(item["content"])
+                if "metadata" in msg:
+                    for item in msg["metadata"]:
+                        with st.expander("Metadata", expanded=True):
+                            st.code(item["content"])
 
-            if "error" in msg:
-                for item in msg["error"]:
-                    with st.expander(title_text(item["content"]), expanded=False):
-                        st.code(item["content"])
-            
-            # Add message action buttons (only for non-system messages)
-            cols = st.columns([0.5, 0.5, 0.5, 0.5, 10])
-            
-            with cols[0]:
-                # Clean copy-to-clipboard button using HTML/JavaScript
+                if "error" in msg:
+                    for item in msg["error"]:
+                        with st.expander(title_text(item["content"]), expanded=False):
+                            st.code(item["content"])
+                
+                # Add styled buttons using Streamlit columns and session state
+                score = message.get('feedback_score', 0)
                 content_to_copy = message['content']
-                b64_content = base64.b64encode(content_to_copy.encode()).decode()
+                
 
-                components.html(f"""
-                    <script>
-                    function copyToClipboard(button, b64text) {{
-                        navigator.clipboard.writeText(atob(b64text)).then(() => {{
-                            const originalText = button.innerHTML;
-                            button.innerHTML = '✅';
-                            setTimeout(() => {{
-                                button.innerHTML = originalText;
-                            }}, 1000);
-                        }}).catch(err => {{
-                            console.error('Failed to copy: ', err);
-                        }});
-                    }}
-                    </script>
-                    <button
-                        onclick="copyToClipboard(this, '{b64_content}')"
-                        title="Copy message content"
-                        style="
-                            background: transparent;
-                            border: none;
-                            color: inherit;
-                            cursor: pointer;
-                            font-size: 1.1rem;
-                            padding: 0;
-                            line-height: 1;
-                            opacity: 0.7;
-                        "
-                    >
-                        📋
-                    </button>
-                """, height=25)
-            
-            with cols[1]:
-                if st.button("👍", key=f"thumbs_up_{idx}", help="Thumbs up", type="secondary"):
-                    st.session_state[f"action_thumbs_up_{idx}"] = True
-            
-            with cols[2]:
-                if st.button("👎", key=f"thumbs_down_{idx}", help="Thumbs down", type="secondary"):
-                    st.session_state[f"action_thumbs_down_{idx}"] = True
-            
-            with cols[3]:
-                if st.button("✏️", key=f"edit_{idx}", help="Edit message", type="secondary"):
-                    st.session_state[f"action_edit_{idx}"] = True
+                
+                # Create button row with proper spacing
+                cols = st.columns([0.1, 0.1, 0.1, 0.1, 1])
+                
+                with cols[0]:
+                    if st.button("📋", key=f"copy_{idx}", help="Copy message content", type="secondary"):
+                        # Simple transparent copy attempt
+                        st.session_state[f"copy_content_{idx}"] = content_to_copy
+                
+                with cols[1]:
+                    up_type = "primary" if score == 1 else "secondary"
+                    if st.button("👍", key=f"thumbs_up_{idx}", help="Thumbs up", type=up_type):
+                        new_score = 0 if score == 1 else 1
+                        metadata_db.update_feedback_score(message['id'], new_score)
+                        _reload_and_rerun(sess, metadata_db)
+                
+                with cols[2]:
+                    down_type = "primary" if score == -1 else "secondary"
+                    if st.button("👎", key=f"thumbs_down_{idx}", help="Thumbs down", type=down_type):
+                        new_score = 0 if score == -1 else -1
+                        metadata_db.update_feedback_score(message['id'], new_score)
+                        _reload_and_rerun(sess, metadata_db)
+                
+                with cols[3]:
+                    if st.button("✏️", key=f"edit_{idx}", help="Edit message", type="secondary"):
+                        sess.editing_message_id = message.get('id')
+                        st.rerun()
+                
+                # Simple transparent copy attempt
+                if f"copy_content_{idx}" in st.session_state:
+                    content = st.session_state[f"copy_content_{idx}"]
+                    del st.session_state[f"copy_content_{idx}"]
+                    
+                    # Try a minimal JavaScript copy approach
+                    import json
+                    escaped_content = json.dumps(content)
+                    
+                    st.markdown(f"""
+                        <script>
+                        try {{
+                            if (navigator.clipboard && navigator.clipboard.writeText) {{
+                                navigator.clipboard.writeText({escaped_content});
+                            }}
+                        }} catch(e) {{
+                            // Fail silently
+                        }}
+                        </script>
+                    """, unsafe_allow_html=True)
+                    
+                    # Show brief feedback
+                    st.toast("Copy attempted", icon="📋")
 
 def _format_dataframe_preview_for_llm(df: pd.DataFrame) -> list[str]:
     """Formats a DataFrame into a TSV-like list of strings for LLM preview, with head/tail truncation."""
@@ -781,11 +961,26 @@ def main():
     conv_manager = sess.conv_manager 
     analytic_db_instance = sess.analytic_db
 
-    # Add CSS styles
-    st.markdown(CODE_WRAP_STYLE, unsafe_allow_html=True)
-    st.markdown(CONVERSATION_BUTTON_STYLE, unsafe_allow_html=True)
-    st.markdown(CONTINUE_AI_PLAN_BUTTON_STYLE, unsafe_allow_html=True)
-    st.markdown(MESSAGE_ACTION_BUTTONS_STYLE, unsafe_allow_html=True)
+    # Add CSS styles with better injection method
+    # Apply styles in the right order and ensure they're applied on every run
+    css_styles = [
+        CODE_WRAP_STYLE,
+        CONVERSATION_BUTTON_STYLE, 
+        CONTINUE_AI_PLAN_BUTTON_STYLE,
+        ACTION_BUTTON_STYLES
+    ]
+    
+    # Use components.html for more reliable CSS injection
+    combined_css = "".join(css_styles)
+    st.markdown(combined_css, unsafe_allow_html=True)
+    
+    # Also inject our action button styles at the page level
+    st.markdown(ACTION_BUTTON_STYLES, unsafe_allow_html=True)
+    
+
+    
+
+
     
     # Render UI
     with st.sidebar:
@@ -872,6 +1067,52 @@ def main():
         chart_tuple = sess.pending_chart.pop(0)
         if process_chart_request(chart_tuple):
             st.rerun()
+
+    if 'pending_completion' in sess and sess.pending_completion:
+        message_id_to_complete = sess.pending_completion
+        sess.pending_completion = None  # Reset flag
+
+        edited_message = next((m for m in sess.db_messages if m['id'] == message_id_to_complete), None)
+
+        if not edited_message:
+            st.error(f"Could not find message {message_id_to_complete} to complete.")
+        else:
+            # Rebuild LLM history up to the message before the edited one
+            sess.llm_handler.messages = []
+            for msg in sess.db_messages:
+                if msg['id'] < message_id_to_complete:
+                    sess.llm_handler.add_message(msg['role'], msg['content'])
+
+            # Extract reasoning to use as the prompt for completion
+            edited_content = edited_message['content']
+            msg_elements = get_elements(edited_content)
+            # Use reasoning content, or the full content if no reasoning tag
+            reasoning_content = msg_elements.get("reasoning", [{}])[0].get("content")
+            if reasoning_content:
+                completion_prompt = f"<reasoning>\n{reasoning_content}\n</reasoning>"
+            else:
+                completion_prompt = edited_content
+
+            sess.llm_handler.add_message(ASSISTANT_ROLE, completion_prompt)
+
+            # Generate the rest of the message
+            completion_result = sess.llm_handler.generate_response()
+
+            if completion_result:
+                # Combine and update the original message
+                final_content = f"{completion_prompt}\n{completion_result}"
+                sess.metadata_db.update_message_content(message_id_to_complete, final_content)
+
+                # After updating, parse the new content for any pending actions
+                final_elements = get_elements(final_content)
+                sess.pending_sql = list(enumerate(final_elements.get("sql", [])))
+                sess.pending_chart = list(enumerate(final_elements.get("chart", [])))
+                sess.pending_python = list(enumerate(final_elements.get("python", [])))
+            else:
+                st.error("Failed to generate completion from LLM.")
+
+            # Reload and show the final state
+            _reload_and_rerun(sess, sess.metadata_db)
 
     if sess.pending_response:
         if generate_llm_response():

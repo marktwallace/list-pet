@@ -142,99 +142,59 @@ button[data-testid="baseButton-secondary"]:has(div:contains("✂️")) div[data-
 # Style for message action buttons (copy, thumbs up, thumbs down, edit)
 MESSAGE_ACTION_BUTTONS_STYLE = """
 <style>
-/* Very aggressive targeting - multiple selector approaches */
-
-/* Target by exact key matches */
-button[key="copy_1"], button[key="copy_2"], button[key="copy_3"], button[key="copy_4"], button[key="copy_5"],
-button[key="copy_6"], button[key="copy_7"], button[key="copy_8"], button[key="copy_9"], button[key="copy_10"],
-button[key^="copy_"], button[key^="thumbs_up_"], button[key^="thumbs_down_"], button[key^="edit_"],
-.stButton button[key^="copy_"], .stButton button[key^="thumbs_up_"], 
-.stButton button[key^="thumbs_down_"], .stButton button[key^="edit_"] {
-    background-color: transparent !important;
-    background: none !important;
-    border: 1px solid transparent !important;
-    box-shadow: none !important;
-    color: #666 !important;
-    padding: 4px 8px !important;
-    font-size: 14px !important;
-    min-height: 32px !important;
-    height: 32px !important;
-    width: 40px !important;
-    min-width: 40px !important;
-    border-radius: 6px !important;
-    transition: all 0.2s ease !important;
-    margin: 1px !important;
-    opacity: 0.5 !important;
+/* Targeting the Streamlit button's container */
+div[data-testid="stButton"] > button {
+    /* Making the button more compact */
+    padding: 0.1rem 0.5rem;
+    font-size: 0.9rem;
 }
 
-/* Hover states */
-button[key^="copy_"]:hover, button[key^="thumbs_up_"]:hover, 
-button[key^="thumbs_down_"]:hover, button[key^="edit_"]:hover,
-.stButton button[key^="copy_"]:hover, .stButton button[key^="thumbs_up_"]:hover,
-.stButton button[key^="thumbs_down_"]:hover, .stButton button[key^="edit_"]:hover {
-    background-color: rgba(100, 100, 100, 0.15) !important;
-    background: rgba(100, 100, 100, 0.15) !important;
-    color: #aaa !important;
-    border: 1px solid transparent !important;
-    box-shadow: none !important;
-    opacity: 1 !important;
-}
-
-/* Focus states */
-button[key^="copy_"]:focus, button[key^="thumbs_up_"]:focus,
-button[key^="thumbs_down_"]:focus, button[key^="edit_"]:focus {
-    border: 1px solid transparent !important;
-    box-shadow: none !important;
-    outline: none !important;
-}
-
-/* Target secondary buttons more generally */
-button[data-testid="baseButton-secondary"] {
-    background-color: transparent !important;
-    border: 1px solid transparent !important;
-    box-shadow: none !important;
-    opacity: 0.5 !important;
-}
-
-button[data-testid="baseButton-secondary"]:hover {
-    background-color: rgba(100, 100, 100, 0.15) !important;
-    border: 1px solid transparent !important;
-    box-shadow: none !important;
-    opacity: 1 !important;
-}
-
-/* Style button containers to reduce spacing */
-.stButton {
-    margin: 0 !important;
-    padding: 0 !important;
-}
-
-/* Target button content */
-.stButton button div[data-testid="stMarkdownContainer"] {
-    text-align: center !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-
-.stButton button div[data-testid="stMarkdownContainer"] p {
-    margin: 0 !important;
-    padding: 0 !important;
-    font-size: 14px !important;
-}
-
-/* Alternative approach - target all buttons in chat message areas */
-.stChatMessage .stButton button {
-    background-color: transparent !important;
-    border: 1px solid transparent !important;
-    box-shadow: none !important;
-    opacity: 0.5 !important;
-}
-
-.stChatMessage .stButton button:hover {
-    background-color: rgba(100, 100, 100, 0.15) !important;
-    opacity: 1 !important;
+/* Specifically target the action buttons via their titles */
+div[data-testid="stButton"] > button[title="Copy message content"],
+div[data-testid="stButton"] > button[title="Thumbs up"],
+div[data-testid="stButton"] > button[title="Thumbs down"],
+div[data-testid="stButton"] > button[title="Edit message"] {
+    font-size: 1.1rem; /* Increase emoji size */
+    padding: 0.1rem 0.2rem; /* Tighter padding for emojis */
 }
 </style>
+"""
+
+FEEDBACK_BUTTON_STYLE = """
+    <style>
+        /* --- Feedback Button Styling --- */
+
+        /* General transition for a smoother feel */
+        div[data-testid="stButton"] > button[title="Thumbs up"],
+        div[data-testid="stButton"] > button[title="Thumbs down"] {
+            transition: all 0.2s ease-in-out;
+            border-radius: 8px;
+        }
+
+        /* UNSELECTED (Secondary) state */
+        div[data-testid="stButton"] > button[data-testid="baseButton-secondary"][title="Thumbs up"],
+        div[data-testid="stButton"] > button[data-testid="baseButton-secondary"][title="Thumbs down"] {
+            background-color: transparent;
+            opacity: 0.5; /* Make them faded */
+        }
+
+        /* HOVER on UNSELECTED */
+        div[data-testid="stButton"] > button[data-testid="baseButton-secondary"][title="Thumbs up"]:hover,
+        div[data-testid="stButton"] > button[data-testid="baseButton-secondary"][title="Thumbs down"]:hover {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+
+        /* SELECTED (Primary) state - Override Streamlit's default green */
+        div[data-testid="stButton"] > button[data-testid="baseButton-primary"][title="Thumbs up"],
+        div[data-testid="stButton"] > button[data-testid="baseButton-primary"][title="Thumbs down"] {
+            background-color: transparent !important;
+            border: 1px solid #4A90E2 !important; /* Blue border */
+            transform: scale(1.1);
+            opacity: 1;
+            box-shadow: 0 0 8px rgba(74, 144, 226, 0.5); /* Blue glow */
+        }
+    </style>
 """
 
 CONTINUE_AI_PLAN_BUTTON_STYLE = """
@@ -268,4 +228,88 @@ div.stButton button[data-testid="baseButton-primary"][key="fix_error_button"]:ho
     border-color: #00b359 !important;
 }
 </style>
-""" 
+"""
+
+# IMPROVED: Custom HTML button styles with high specificity
+ACTION_BUTTON_STYLES = """
+<style>
+/* --- DEBUG: Very obvious test styles --- */
+.action-button {
+    background-color: red !important; /* DEBUG: Should be very obvious if working */
+    border: 3px solid yellow !important;
+    color: white !important;
+    font-size: 1.1rem !important;
+    padding: 0.4rem !important;
+    border-radius: 0.5rem !important;
+    transition: all 0.2s ease-in-out !important;
+    width: 2.5em !important;
+    height: 2.5em !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    cursor: pointer !important;
+    margin: 0 2px !important;
+    box-sizing: border-box !important;
+    font-family: "Source Sans Pro", sans-serif !important;
+}
+
+.action-button:hover {
+    color: rgba(250, 250, 250, 1); /* Full opacity on hover */
+    border-color: rgb(70, 75, 95); /* Lighter border on hover */
+    transform: scale(1.05);
+    background-color: rgb(49, 51, 63); /* Slightly lighter background on hover */
+}
+
+.action-button.selected {
+    background-color: #4A90E2;
+    border-color: #4A90E2;
+    color: white;
+    opacity: 1;
+    transform: scale(1.05);
+    box-shadow: 0 0 10px rgba(74, 144, 226, 0.4);
+    animation: buttonSelect 0.3s ease-out;
+}
+
+.action-button.selected:hover {
+    background-color: #3A7BC8;
+    border-color: #3A7BC8;
+    transform: scale(1.08);
+}
+
+/* Animation for selected state */
+@keyframes buttonSelect {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1.05); }
+}
+
+/* Copy button styling (keeping this separate from action buttons) */
+.copy-button {
+    background-color: blue !important; /* DEBUG: Should be very obvious */
+    border: 3px solid orange !important;
+    color: white !important;
+    cursor: pointer !important;
+    font-size: 1.1rem !important;
+    padding: 0.4rem !important;
+    border-radius: 0.5rem !important;
+    line-height: 1 !important;
+    transition: all 0.2s ease-in-out !important;
+    width: 2.5em !important;
+    height: 2.5em !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    margin: 0 2px !important;
+    box-sizing: border-box !important;
+    font-family: "Source Sans Pro", sans-serif !important;
+}
+
+.copy-button:hover {
+    color: rgba(250, 250, 250, 1); /* Full opacity on hover */
+    border-color: rgb(70, 75, 95);
+    transform: scale(1.05);
+    background-color: rgb(49, 51, 63);
+}
+</style>
+"""
+

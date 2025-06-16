@@ -58,9 +58,11 @@ class MetadataDatabase:
                     role VARCHAR,
                     content TEXT,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    feedback_score INTEGER DEFAULT 0,
                     FOREIGN KEY (conversation_id) REFERENCES pet_meta.conversations(id)
                 )
             """)
+            self.conn.execute("ALTER TABLE pet_meta.message_log ADD COLUMN IF NOT EXISTS feedback_score INTEGER DEFAULT 0")
             
         except Exception as e:
             error_msg = f"Failed to initialize pet_meta schema: {str(e)}"
@@ -158,18 +160,25 @@ class MetadataDatabase:
             print(f"ERROR - Get conversations traceback: {traceback.format_exc()}")
             return []
 
-    def log_message(self, message: dict, conversation_id: int) -> bool:
-        """Store a message in the pet_meta.message_log table"""
+    def log_message(self, message: dict, conversation_id: int) -> int | None:
+        """Store a message in the pet_meta.message_log table and return its ID."""
         try:
             role = message.get("role", "unknown")
             content = message.get("content", "")
             
-            # Insert the message into the log
-            self.conn.execute("""
+            # Insert the message into the log and return the new ID
+            result = self.conn.execute("""
                 INSERT INTO pet_meta.message_log (id, conversation_id, role, content)
                 VALUES (nextval('pet_meta.message_log_seq'), ?, ?, ?)
-            """, [conversation_id, role, content])
+                RETURNING id
+            """, [conversation_id, role, content]).fetchone()
             
+            if not result:
+                print(f"ERROR - Message logging failed for conversation {conversation_id}, no ID returned")
+                return None
+
+            new_id = result[0]
+
             # Update conversation last_updated timestamp
             self.conn.execute("""
                 UPDATE pet_meta.conversations
@@ -177,19 +186,19 @@ class MetadataDatabase:
                 WHERE id = ?
             """, [conversation_id])
             
-            print(f"DEBUG - Message logged to conversation {conversation_id}")
-            return True
+            print(f"DEBUG - Message logged to conversation {conversation_id} with new ID {new_id}")
+            return new_id
         except Exception as e:
             error_msg = f"Failed to log message: {str(e)}"
             print(f"ERROR - {error_msg}")
             print(f"ERROR - Message logging traceback: {traceback.format_exc()}")
-            return False
+            return None
     
     def load_messages(self, conversation_id: int) -> list[dict]:
-        """Load messages for a specific conversation"""
+        """Load messages for a specific conversation, including their IDs."""
         try:
             results = self.conn.execute("""
-                SELECT role, content
+                SELECT id, role, content, feedback_score
                 FROM pet_meta.message_log
                 WHERE conversation_id = ?
                 ORDER BY id ASC
@@ -202,8 +211,10 @@ class MetadataDatabase:
             messages = []
             for row in results:
                 messages.append({
-                    "role": row[0],
-                    "content": row[1]
+                    "id": row[0],
+                    "role": row[1],
+                    "content": row[2],
+                    "feedback_score": row[3],
                 })
             
             print(f"DEBUG - Loaded {len(messages)} messages from conversation {conversation_id}")
@@ -213,6 +224,66 @@ class MetadataDatabase:
             print(f"ERROR - {error_msg}")
             print(f"ERROR - Message loading traceback: {traceback.format_exc()}")
             return []
+
+    def update_message_content(self, message_id: int, content: str) -> bool:
+        """Updates the content of a specific message."""
+        try:
+            res = self.conn.execute("SELECT id, conversation_id FROM pet_meta.message_log WHERE id = ?", [message_id]).fetchone()
+            if not res:
+                print(f"ERROR - No message found with id {message_id} to update.")
+                return False
+            
+            conversation_id = res[1]
+
+            self.conn.execute("UPDATE pet_meta.message_log SET content = ? WHERE id = ?", [content, message_id])
+            
+            self.conn.execute("UPDATE pet_meta.conversations SET last_updated = CURRENT_TIMESTAMP WHERE id = ?", [conversation_id])
+            
+            print(f"DEBUG - Updated content for message {message_id} in conversation {conversation_id}")
+            return True
+        except Exception as e:
+            print(f"ERROR - Failed to update message content for id {message_id}: {e}")
+            print(traceback.format_exc())
+            return False
+
+    def update_feedback_score(self, message_id: int, score: int) -> bool:
+        """Updates the feedback score of a specific message."""
+        try:
+            self.conn.execute("UPDATE pet_meta.message_log SET feedback_score = ? WHERE id = ?", [score, message_id])
+            print(f"DEBUG - Updated feedback score for message {message_id} to {score}")
+            return True
+        except Exception as e:
+            print(f"ERROR - Failed to update feedback score for id {message_id}: {e}")
+            print(traceback.format_exc())
+            return False
+
+    def get_feedback_score(self, message_id: int) -> int:
+        """Gets the feedback score of a specific message."""
+        try:
+            result = self.conn.execute("SELECT feedback_score FROM pet_meta.message_log WHERE id = ?", [message_id]).fetchone()
+            if result:
+                return result[0] or 0
+            return 0
+        except Exception as e:
+            print(f"ERROR - Failed to get feedback score for id {message_id}: {e}")
+            return 0
+
+    def delete_subsequent_messages(self, conversation_id: int, message_id: int) -> bool:
+        """Deletes all messages after a specific message ID in a conversation."""
+        try:
+            self.conn.execute("""
+                DELETE FROM pet_meta.message_log
+                WHERE conversation_id = ? AND id > ?
+            """, [conversation_id, message_id])
+            
+            self.conn.execute("UPDATE pet_meta.conversations SET last_updated = CURRENT_TIMESTAMP WHERE id = ?", [conversation_id])
+
+            print(f"DEBUG - Deleted messages after {message_id} in conversation {conversation_id}")
+            return True
+        except Exception as e:
+            print(f"ERROR - Failed to delete subsequent messages for conversation {conversation_id}: {e}")
+            print(traceback.format_exc())
+            return False
 
     def trim_conversation_after_message(self, conversation_id: int, message_id: int) -> bool:
         """Delete all messages after the specified message ID in a conversation"""
