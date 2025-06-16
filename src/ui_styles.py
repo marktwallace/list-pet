@@ -316,41 +316,73 @@ ACTION_BUTTON_STYLES = """
 # Subtle appearance for in-message action buttons (▲ ▼ ✎)
 SUBTLE_ACTION_BUTTON_STYLE = """
 <style>
-/* Default: grey, small, low opacity */
-div[data-testid='stButton'] > button[title="Thumbs up"],
-div[data-testid='stButton'] > button[title="Thumbs down"],
-div[data-testid='stButton'] > button[title="Edit message"] {
+/* Force square buttons with very high specificity */
+.main .block-container div[data-testid='stButton'] button[title="Thumbs up"],
+.main .block-container div[data-testid='stButton'] button[title="Thumbs down"],
+.main .block-container div[data-testid='stButton'] button[title="Edit message"],
+div[data-testid='stVerticalBlock'] div[data-testid='stButton'] button[title="Thumbs up"],
+div[data-testid='stVerticalBlock'] div[data-testid='stButton'] button[title="Thumbs down"],
+div[data-testid='stVerticalBlock'] div[data-testid='stButton'] button[title="Edit message"],
+.stChatMessage div[data-testid='stButton'] button[title="Thumbs up"],
+.stChatMessage div[data-testid='stButton'] button[title="Thumbs down"],
+.stChatMessage div[data-testid='stButton'] button[title="Edit message"] {
     background: transparent !important;
     border: none !important;
     font-size: 0.9rem !important;
     opacity: 0.35 !important;
-    padding: 0.1rem 0.1rem !important;
+    padding: 0 !important;
+    margin: 0 !important;
     line-height: 1 !important;
-    transition: opacity 0.2s ease, transform 0.2s ease;
+    transition: opacity 0.2s ease, transform 0.2s ease !important;
     width: 2rem !important;
     height: 2rem !important;
     min-width: 2rem !important;
     max-width: 2rem !important;
+    min-height: 2rem !important;
+    max-height: 2rem !important;
     display: inline-flex !important;
     justify-content: center !important;
     align-items: center !important;
+    box-sizing: border-box !important;
+    border-radius: 4px !important;
 }
 
-/* Hover: brighten slightly */
-div[data-testid='stButton'] > button[title="Thumbs up"]:hover,
-div[data-testid='stButton'] > button[title="Thumbs down"]:hover,
-div[data-testid='stButton'] > button[title="Edit message"]:hover {
-    opacity: 0.9 !important;
-    transform: scale(1.1);
-}
-
-/* Selected state (primary) keeps Streamlit green but we tone it down */
-div[data-testid='stButton'] > button[data-testid='baseButton-primary'][title="Thumbs up"],
-div[data-testid='stButton'] > button[data-testid='baseButton-primary'][title="Thumbs down"] {
+/* Force square buttons for selected state */
+.main .block-container div[data-testid='stButton'] button[data-testid='baseButton-primary'][title="Thumbs up"],
+.main .block-container div[data-testid='stButton'] button[data-testid='baseButton-primary'][title="Thumbs down"],
+div[data-testid='stVerticalBlock'] div[data-testid='stButton'] button[data-testid='baseButton-primary'][title="Thumbs up"],
+div[data-testid='stVerticalBlock'] div[data-testid='stButton'] button[data-testid='baseButton-primary'][title="Thumbs down"],
+.stChatMessage div[data-testid='stButton'] button[data-testid='baseButton-primary'][title="Thumbs up"],
+.stChatMessage div[data-testid='stButton'] button[data-testid='baseButton-primary'][title="Thumbs down"] {
     background-color: #2f8df9 !important;
     border: none !important;
     color: white !important;
     opacity: 1 !important;
+    width: 2rem !important;
+    height: 2rem !important;
+    min-width: 2rem !important;
+    max-width: 2rem !important;
+    min-height: 2rem !important;
+    max-height: 2rem !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+    border-radius: 4px !important;
+}
+
+/* Hover effects with high specificity */
+.main .block-container div[data-testid='stButton'] button[title="Thumbs up"]:hover,
+.main .block-container div[data-testid='stButton'] button[title="Thumbs down"]:hover,
+.main .block-container div[data-testid='stButton'] button[title="Edit message"]:hover,
+div[data-testid='stVerticalBlock'] div[data-testid='stButton'] button[title="Thumbs up"]:hover,
+div[data-testid='stVerticalBlock'] div[data-testid='stButton'] button[title="Thumbs down"]:hover,
+div[data-testid='stVerticalBlock'] div[data-testid='stButton'] button[title="Edit message"]:hover,
+.stChatMessage div[data-testid='stButton'] button[title="Thumbs up"]:hover,
+.stChatMessage div[data-testid='stButton'] button[title="Thumbs down"]:hover,
+.stChatMessage div[data-testid='stButton'] button[title="Edit message"]:hover {
+    opacity: 0.9 !important;
+    transform: scale(1.1) !important;
 }
 </style>
 """
