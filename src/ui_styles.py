@@ -313,3 +313,45 @@ ACTION_BUTTON_STYLES = """
 </style>
 """
 
+# Subtle appearance for in-message action buttons (▲ ▼ ✎)
+SUBTLE_ACTION_BUTTON_STYLE = """
+<style>
+/* Default: grey, small, low opacity */
+div[data-testid='stButton'] > button[title="Thumbs up"],
+div[data-testid='stButton'] > button[title="Thumbs down"],
+div[data-testid='stButton'] > button[title="Edit message"] {
+    background: transparent !important;
+    border: none !important;
+    font-size: 0.9rem !important;
+    opacity: 0.35 !important;
+    padding: 0.1rem 0.1rem !important;
+    line-height: 1 !important;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    width: 2rem !important;
+    height: 2rem !important;
+    min-width: 2rem !important;
+    max-width: 2rem !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+/* Hover: brighten slightly */
+div[data-testid='stButton'] > button[title="Thumbs up"]:hover,
+div[data-testid='stButton'] > button[title="Thumbs down"]:hover,
+div[data-testid='stButton'] > button[title="Edit message"]:hover {
+    opacity: 0.9 !important;
+    transform: scale(1.1);
+}
+
+/* Selected state (primary) keeps Streamlit green but we tone it down */
+div[data-testid='stButton'] > button[data-testid='baseButton-primary'][title="Thumbs up"],
+div[data-testid='stButton'] > button[data-testid='baseButton-primary'][title="Thumbs down"] {
+    background-color: #2f8df9 !important;
+    border: none !important;
+    color: white !important;
+    opacity: 1 !important;
+}
+</style>
+"""
+

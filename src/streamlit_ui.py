@@ -32,7 +32,7 @@ from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
 from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
-from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON, CONTINUE_AI_PLAN_BUTTON_STYLE, ACTION_BUTTON_STYLES
+from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON, CONTINUE_AI_PLAN_BUTTON_STYLE, ACTION_BUTTON_STYLES, SUBTLE_ACTION_BUTTON_STYLE
 from .python_executor import execute_python_code
 
 # Constants for continuation tags
@@ -74,17 +74,17 @@ def create_action_buttons_html(message_id, idx, current_score):
         
         <!-- Thumbs Up Button -->
         <button class="{thumbs_up_class}" onclick="{thumbs_up_func}()" title="Thumbs up">
-            👍
+            ⌃
         </button>
         
         <!-- Thumbs Down Button -->
         <button class="{thumbs_down_class}" onclick="{thumbs_down_func}()" title="Thumbs down">
-            👎
+            ˅
         </button>
         
         <!-- Edit Button -->
         <button class="action-button" onclick="{edit_func}()" title="Edit message">
-            ✏️
+            ✎
         </button>
     </div>
     
@@ -511,7 +511,7 @@ def display_message(idx, message, sess, analytic_db, metadata_db):
                 # --- THUMBS UP ---
                 with cols[0]:
                     up_type = "primary" if message.get('feedback_score', 0) == 1 else "secondary"
-                    if st.button("👍", key=f"thumbs_up_{idx}", help="Thumbs up", type=up_type):
+                    if st.button("˄", key=f"thumbs_up_{idx}", help="Thumbs up", type=up_type):
                         new_score = 0 if message.get('feedback_score', 0) == 1 else 1
                         metadata_db.update_feedback_score(message['id'], new_score)
                         _reload_and_rerun(sess, metadata_db)
@@ -519,14 +519,14 @@ def display_message(idx, message, sess, analytic_db, metadata_db):
                 # --- THUMBS DOWN ---
                 with cols[1]:
                     down_type = "primary" if message.get('feedback_score', 0) == -1 else "secondary"
-                    if st.button("👎", key=f"thumbs_down_{idx}", help="Thumbs down", type=down_type):
+                    if st.button("˅", key=f"thumbs_down_{idx}", help="Thumbs down", type=down_type):
                         new_score = 0 if message.get('feedback_score', 0) == -1 else -1
                         metadata_db.update_feedback_score(message['id'], new_score)
                         _reload_and_rerun(sess, metadata_db)
 
                 # --- EDIT ---
                 with cols[2]:
-                    if st.button("✏️", key=f"edit_{idx}", help="Edit message", type="secondary"):
+                    if st.button("✎", key=f"edit_{idx}", help="Edit message", type="secondary"):
                         sess.editing_message_id = message.get('id')
                         st.rerun()
 
@@ -933,9 +933,10 @@ def main():
     # Apply styles in the right order and ensure they're applied on every run
     css_styles = [
         CODE_WRAP_STYLE,
-        CONVERSATION_BUTTON_STYLE, 
+        CONVERSATION_BUTTON_STYLE,
         CONTINUE_AI_PLAN_BUTTON_STYLE,
-        ACTION_BUTTON_STYLES
+        ACTION_BUTTON_STYLES,
+        SUBTLE_ACTION_BUTTON_STYLE
     ]
     
     # Use components.html for more reliable CSS injection
