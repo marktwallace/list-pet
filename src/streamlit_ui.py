@@ -31,7 +31,7 @@ from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
 from .conversation_manager import ConversationManager, USER_ROLE, ASSISTANT_ROLE, SYSTEM_ROLE
-from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON, CONTINUE_AI_PLAN_BUTTON_STYLE
+from .ui_styles import CODE_WRAP_STYLE, CONVERSATION_BUTTON_STYLE, TRAIN_ICON, CONTINUE_AI_PLAN_BUTTON_STYLE, MESSAGE_ACTION_BUTTONS_STYLE
 from .python_executor import execute_python_code
 
 # Constants for continuation tags
@@ -328,6 +328,25 @@ def display_message(idx, message, sess, analytic_db, metadata_db):
                 for item in msg["error"]:
                     with st.expander(title_text(item["content"]), expanded=False):
                         st.code(item["content"])
+            
+            # Add message action buttons (only for non-system messages)
+            cols = st.columns([0.5, 0.5, 0.5, 0.5, 10])
+            
+            with cols[0]:
+                if st.button("📋", key=f"copy_{idx}", help="Copy message", type="secondary"):
+                    st.session_state[f"action_copy_{idx}"] = True
+            
+            with cols[1]:
+                if st.button("👍", key=f"thumbs_up_{idx}", help="Thumbs up", type="secondary"):
+                    st.session_state[f"action_thumbs_up_{idx}"] = True
+            
+            with cols[2]:
+                if st.button("👎", key=f"thumbs_down_{idx}", help="Thumbs down", type="secondary"):
+                    st.session_state[f"action_thumbs_down_{idx}"] = True
+            
+            with cols[3]:
+                if st.button("✏️", key=f"edit_{idx}", help="Edit message", type="secondary"):
+                    st.session_state[f"action_edit_{idx}"] = True
 
 def _format_dataframe_preview_for_llm(df: pd.DataFrame) -> list[str]:
     """Formats a DataFrame into a TSV-like list of strings for LLM preview, with head/tail truncation."""
@@ -732,6 +751,7 @@ def main():
     st.markdown(CODE_WRAP_STYLE, unsafe_allow_html=True)
     st.markdown(CONVERSATION_BUTTON_STYLE, unsafe_allow_html=True)
     st.markdown(CONTINUE_AI_PLAN_BUTTON_STYLE, unsafe_allow_html=True)
+    st.markdown(MESSAGE_ACTION_BUTTONS_STYLE, unsafe_allow_html=True)
     
     # Render UI
     with st.sidebar:
