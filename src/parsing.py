@@ -16,8 +16,8 @@ SQL_REGEX = r"^\s*(?:" + \
 def get_elements(content):
     result = {}        
     # Updated pattern to capture tag attributes
-    pattern = r'<(\w+)(\s+[^>]*)?>(?s)(.*?)</\1>'
-    matches = re.finditer(pattern, content, re.DOTALL)
+    pattern = r'(?s)<(\w+)(\s+[^>]*)?>(.*?)</\1>'
+    matches = re.finditer(pattern, content)
     for match in matches:
         tag_name = match.group(1)
         attributes_str = match.group(2) or ""
