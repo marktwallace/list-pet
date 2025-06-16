@@ -81,6 +81,8 @@ class MetadataDatabase:
             
             if result:
                 conversation_id = result[0]  # Already a Python int
+                # Commit to ensure data is persisted to disk
+                self.conn.commit()
                 print(f"DEBUG - Created new conversation with ID: {conversation_id}")
                 return conversation_id
             else:
@@ -123,6 +125,8 @@ class MetadataDatabase:
             """
             
             self.conn.execute(query, params)
+            # Commit to ensure data is persisted to disk
+            self.conn.commit()
             print(f"DEBUG - Updated conversation {conversation_id}")
             return True
         except Exception as e:
@@ -186,6 +190,9 @@ class MetadataDatabase:
                 WHERE id = ?
             """, [conversation_id])
             
+            # Commit to ensure data is persisted to disk
+            self.conn.commit()
+            
             print(f"DEBUG - Message logged to conversation {conversation_id} with new ID {new_id}")
             return new_id
         except Exception as e:
@@ -239,6 +246,9 @@ class MetadataDatabase:
             
             self.conn.execute("UPDATE pet_meta.conversations SET last_updated = CURRENT_TIMESTAMP WHERE id = ?", [conversation_id])
             
+            # Commit to ensure data is persisted to disk
+            self.conn.commit()
+            
             print(f"DEBUG - Updated content for message {message_id} in conversation {conversation_id}")
             return True
         except Exception as e:
@@ -250,6 +260,8 @@ class MetadataDatabase:
         """Updates the feedback score of a specific message."""
         try:
             self.conn.execute("UPDATE pet_meta.message_log SET feedback_score = ? WHERE id = ?", [score, message_id])
+            # Commit to ensure data is persisted to disk
+            self.conn.commit()
             print(f"DEBUG - Updated feedback score for message {message_id} to {score}")
             return True
         except Exception as e:
@@ -277,6 +289,9 @@ class MetadataDatabase:
             """, [conversation_id, message_id])
             
             self.conn.execute("UPDATE pet_meta.conversations SET last_updated = CURRENT_TIMESTAMP WHERE id = ?", [conversation_id])
+            
+            # Commit to ensure data is persisted to disk
+            self.conn.commit()
 
             print(f"DEBUG - Deleted messages after {message_id} in conversation {conversation_id}")
             return True
@@ -302,10 +317,44 @@ class MetadataDatabase:
                 WHERE id = ?
             """, [conversation_id])
             
+            # Commit to ensure data is persisted to disk
+            self.conn.commit()
+            
             print(f"DEBUG - Trimmed conversation {conversation_id} after message {message_id}")
             return True
         except Exception as e:
             error_msg = f"Failed to trim conversation: {str(e)}"
             print(f"ERROR - {error_msg}")
             print(f"ERROR - Conversation trim traceback: {traceback.format_exc()}")
+            return False
+
+    def commit(self) -> bool:
+        """Explicitly commit any pending transactions. Useful for periodic commits during idle times."""
+        try:
+            self.conn.commit()
+            print("DEBUG - Explicitly committed metadata database transactions")
+            return True
+        except Exception as e:
+            print(f"ERROR - Failed to commit metadata database: {e}")
+            return False
+
+    def checkpoint(self) -> bool:
+        """Perform a WAL checkpoint to merge WAL file back into main database file."""
+        try:
+            self.conn.execute("PRAGMA force_checkpoint")
+            print("DEBUG - WAL checkpoint completed, WAL file should be smaller")
+            return True
+        except Exception as e:
+            print(f"ERROR - Failed to checkpoint WAL: {e}")
+            return False
+
+    def commit_and_checkpoint(self) -> bool:
+        """Commit and checkpoint in one operation for maximum data persistence."""
+        try:
+            self.conn.commit()
+            self.conn.execute("PRAGMA force_checkpoint") 
+            print("DEBUG - Committed and checkpointed metadata database")
+            return True
+        except Exception as e:
+            print(f"ERROR - Failed to commit and checkpoint: {e}")
             return False 
