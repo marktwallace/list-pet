@@ -6,6 +6,7 @@ import sys
 import atexit
 import signal
 import base64
+import streamlit.components.v1 as components
 
 import streamlit as st
 import pandas as pd
@@ -333,8 +334,41 @@ def display_message(idx, message, sess, analytic_db, metadata_db):
             cols = st.columns([0.5, 0.5, 0.5, 0.5, 10])
             
             with cols[0]:
-                if st.button("📋", key=f"copy_{idx}", help="Copy message", type="secondary"):
-                    st.session_state[f"action_copy_{idx}"] = True
+                # Clean copy-to-clipboard button using HTML/JavaScript
+                content_to_copy = message['content']
+                b64_content = base64.b64encode(content_to_copy.encode()).decode()
+
+                components.html(f"""
+                    <script>
+                    function copyToClipboard(button, b64text) {{
+                        navigator.clipboard.writeText(atob(b64text)).then(() => {{
+                            const originalText = button.innerHTML;
+                            button.innerHTML = '✅';
+                            setTimeout(() => {{
+                                button.innerHTML = originalText;
+                            }}, 1000);
+                        }}).catch(err => {{
+                            console.error('Failed to copy: ', err);
+                        }});
+                    }}
+                    </script>
+                    <button
+                        onclick="copyToClipboard(this, '{b64_content}')"
+                        title="Copy message content"
+                        style="
+                            background: transparent;
+                            border: none;
+                            color: inherit;
+                            cursor: pointer;
+                            font-size: 1.1rem;
+                            padding: 0;
+                            line-height: 1;
+                            opacity: 0.7;
+                        "
+                    >
+                        📋
+                    </button>
+                """, height=25)
             
             with cols[1]:
                 if st.button("👍", key=f"thumbs_up_{idx}", help="Thumbs up", type="secondary"):
