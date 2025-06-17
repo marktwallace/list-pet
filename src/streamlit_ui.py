@@ -821,12 +821,7 @@ def cleanup_resources():
         sess.analytic_db.close()
         print("DEBUG - Closed analytic database connection")
     if hasattr(sess, 'metadata_db') and sess.metadata_db:
-        # Commit any pending transactions and checkpoint WAL before closing
-        try:
-            sess.metadata_db.commit_and_checkpoint()
-            print("DEBUG - Committed and checkpointed metadata database")
-        except Exception as e:
-            print(f"DEBUG - Error committing/checkpointing metadata database: {e}")
+        # A clean close on the connection will handle checkpointing the WAL file.
         sess.metadata_db.conn.close()
         print("DEBUG - Closed metadata database connection")
 
@@ -1118,6 +1113,18 @@ def main():
                         sess.conv_manager.add_message(role=USER_ROLE, content=fix_request_message)
                         sess.pending_response = True
                         st.rerun()
+
+    # When the application is idle and about to wait for user input,
+    # perform a checkpoint to ensure all data is safely persisted.
+    # This is the most reliable way to prevent data loss from unclean shutdowns.
+    if hasattr(sess, 'metadata_db') and sess.metadata_db:
+        try:
+            is_idle = not (sess.pending_sql or sess.pending_chart or sess.pending_python or sess.pending_response)
+            if is_idle:
+                print("DEBUG - Performing idle checkpoint before waiting for user input...")
+                sess.metadata_db.checkpoint()
+        except Exception as e:
+            print(f"DEBUG - Idle checkpoint failed: {e}")
 
     # Process user input    
     user_chat_input = st.chat_input("Type your message...") # Renamed variable
