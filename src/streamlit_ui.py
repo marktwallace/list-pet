@@ -1119,23 +1119,6 @@ def main():
                         sess.pending_response = True
                         st.rerun()
 
-    # Checkpoint database when idle and waiting for user input
-    # This ensures WAL file is merged even if user terminates with Ctrl+C
-    # Use simple throttling to avoid checkpointing too frequently
-    if hasattr(sess, 'metadata_db') and sess.metadata_db:
-        current_time = datetime.now()
-        if 'last_checkpoint_time' not in sess:
-            sess.last_checkpoint_time = current_time
-        
-        # Only checkpoint if it's been more than 30 seconds since last checkpoint
-        time_since_last = (current_time - sess.last_checkpoint_time).total_seconds()
-        if time_since_last > 30:
-            try:
-                sess.metadata_db.checkpoint()
-                sess.last_checkpoint_time = current_time
-            except Exception as e:
-                print(f"DEBUG - Checkpoint during idle failed: {e}")
-
     # Process user input    
     user_chat_input = st.chat_input("Type your message...") # Renamed variable
     if user_chat_input:
