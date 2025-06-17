@@ -868,9 +868,21 @@ def main():
 
     # Register cleanup on exit, but only once per session
     if 'cleanup_registered' not in sess:
+        def graceful_shutdown(sig, frame):
+            """Handle signals for graceful shutdown."""
+            print(f"INFO - Caught signal {sig}, initiating graceful shutdown...")
+            cleanup_resources()
+            sys.exit(0)
+            
+        # Register the handler for SIGINT (Ctrl+C) and SIGTERM
+        signal.signal(signal.SIGINT, graceful_shutdown)
+        signal.signal(signal.SIGTERM, graceful_shutdown)
+
+        # Also register with atexit for normal exits, as a fallback
         atexit.register(cleanup_resources)
+        
         sess.cleanup_registered = True
-        print("DEBUG - atexit cleanup handler registered.")
+        print("DEBUG - atexit and signal cleanup handlers registered.")
     
     global conv_manager # To assign to the global variable from session state
 

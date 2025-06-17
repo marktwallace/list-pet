@@ -2,6 +2,7 @@ import duckdb
 import streamlit as st
 import traceback
 from datetime import datetime
+import os
 
 class MetadataDatabase:
     """Handles conversation and message persistence in DuckDB."""
@@ -13,7 +14,29 @@ class MetadataDatabase:
             db_path: Path to DuckDB file. If None, uses session state connection.
         """
         if db_path:
-            self.conn = duckdb.connect(db_path)
+            try:
+                self.conn = duckdb.connect(db_path)
+            except duckdb.BinderException as e:
+                # Check if it's a WAL replay error
+                if "Failure while replaying WAL" in str(e):
+                    print(f"WARNING - WAL replay error: {e}. Attempting to recover by removing the WAL file.")
+                    wal_path = db_path + ".wal"
+                    if os.path.exists(wal_path):
+                        try:
+                            os.remove(wal_path)
+                            print(f"INFO - Removed potentially corrupt WAL file: {wal_path}")
+                            # Try connecting again after removing the WAL
+                            self.conn = duckdb.connect(db_path)
+                            print("INFO - Successfully reconnected to database.")
+                        except Exception as recovery_e:
+                            print(f"ERROR - Failed to remove WAL file and recover. Please check permissions or manually delete the file. Error: {recovery_e}")
+                            raise e
+                    else:
+                        print("ERROR - WAL file not found for removal, cannot recover.")
+                        raise e
+                else:
+                    # Reraise other binder exceptions
+                    raise e
         else:
             self.conn = st.session_state.get("conn")
             if not self.conn:
