@@ -16,26 +16,18 @@ class MetadataDatabase:
         if db_path:
             try:
                 self.conn = duckdb.connect(db_path)
-            except duckdb.BinderException as e:
+            except (duckdb.BinderException, duckdb.OperationalError) as e:
                 # Check if it's a WAL replay error
                 if "Failure while replaying WAL" in str(e):
-                    print(f"WARNING - WAL replay error: {e}. Attempting to recover by removing the WAL file.")
-                    wal_path = db_path + ".wal"
-                    if os.path.exists(wal_path):
-                        try:
-                            os.remove(wal_path)
-                            print(f"INFO - Removed potentially corrupt WAL file: {wal_path}")
-                            # Try connecting again after removing the WAL
-                            self.conn = duckdb.connect(db_path)
-                            print("INFO - Successfully reconnected to database.")
-                        except Exception as recovery_e:
-                            print(f"ERROR - Failed to remove WAL file and recover. Please check permissions or manually delete the file. Error: {recovery_e}")
-                            raise e
-                    else:
-                        print("ERROR - WAL file not found for removal, cannot recover.")
-                        raise e
+                    print(f"FATAL - DuckDB WAL file is corrupt or unreplayable: {e}")
+                    print(f"FATAL - This usually means the application did not shut down cleanly.")
+                    print("FATAL - To prevent data loss, the application will not automatically delete the WAL file and will now exit.")
+                    print(f"FATAL - Please inspect the database file '{db_path}' and its WAL file '{db_path}.wal'.")
+                    print("FATAL - You may need to restore from a backup or manually move/delete the WAL file to start the application again.")
+                    # Re-raise to stop the application
+                    raise e
                 else:
-                    # Reraise other binder exceptions
+                    # Reraise other binder/operational exceptions
                     raise e
         else:
             self.conn = st.session_state.get("conn")
@@ -87,6 +79,11 @@ class MetadataDatabase:
             """)
             self.conn.execute("ALTER TABLE pet_meta.message_log ADD COLUMN IF NOT EXISTS feedback_score INTEGER DEFAULT 0")
             
+            # Commit and checkpoint to ensure schema is durably persisted
+            self.conn.commit()
+            self.conn.execute("PRAGMA force_checkpoint")
+            print("DEBUG - pet_meta schema initialized and checkpointed.")
+
         except Exception as e:
             error_msg = f"Failed to initialize pet_meta schema: {str(e)}"
             print(f"ERROR - {error_msg}")
