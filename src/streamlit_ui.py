@@ -2,9 +2,7 @@ from datetime import datetime
 import os
 import re
 import traceback
-import sys
 import atexit
-import signal
 import base64
 import streamlit.components.v1 as components
 
@@ -868,21 +866,15 @@ def main():
 
     # Register cleanup on exit, but only once per session
     if 'cleanup_registered' not in sess:
-        def graceful_shutdown(sig, frame):
-            """Handle signals for graceful shutdown."""
-            print(f"INFO - Caught signal {sig}, initiating graceful shutdown...")
-            cleanup_resources()
-            sys.exit(0)
-            
-        # Register the handler for SIGINT (Ctrl+C) and SIGTERM
-        signal.signal(signal.SIGINT, graceful_shutdown)
-        signal.signal(signal.SIGTERM, graceful_shutdown)
-
-        # Also register with atexit for normal exits, as a fallback
+        # The signal-based cleanup is not compatible with Streamlit's threading model.
+        # We rely on atexit for graceful shutdowns and periodic checkpointing
+        # to minimize data loss on abrupt termination.
+        
+        # Register with atexit for normal exits.
         atexit.register(cleanup_resources)
         
         sess.cleanup_registered = True
-        print("DEBUG - atexit and signal cleanup handlers registered.")
+        print("DEBUG - atexit cleanup handler registered.")
     
     global conv_manager # To assign to the global variable from session state
 
