@@ -25,7 +25,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from .prompt_loader import get_prompts
 from .metadata_database import MetadataDatabase
-from .analytic_factory import create_analytic_database, get_available_database_types
+from .duckdb_analytic import DuckDBAnalytic
 from .parsing import get_elements, SQL_REGEX
 from .chart_renderer import render_chart
 from .llm_handler import LLMHandler
@@ -895,31 +895,19 @@ def main():
             print(f"DEBUG - MetadataDatabase initialized: {conversation_path}")
 
         if 'analytic_db' not in sess:
-            # Get database type from settings
-            db_type = os.environ.get("ANALYTIC_DATABASE")
-            if not db_type:
-                st.error("ANALYTIC_DATABASE environment variable is required in settings.env")
-                st.stop()
-                
-            if db_type not in ["duckdb", "postgresql"]:
-                st.error(f"ANALYTIC_DATABASE must be either 'duckdb' or 'postgresql', got: {db_type}")
+            # The factory is removed, we now directly connect to DuckDB.
+            analytic_file = os.environ.get("DUCKDB_ANALYTIC_FILE")
+            if not analytic_file:
+                st.error("DUCKDB_ANALYTIC_FILE environment variable is required in settings.env")
                 st.stop()
             
-            if db_type == "postgresql":
-                postgres_conn_str = os.environ.get("POSTGRES_CONN_STR")
-                if not postgres_conn_str:
-                    st.error("POSTGRES_CONN_STR environment variable is required when ANALYTIC_DATABASE=postgresql")
-                    st.stop()
-                sess.analytic_db = create_analytic_database("postgresql", postgres_conn_str=postgres_conn_str)
-                print("DEBUG - Using PostgreSQL for analytic queries")
-            else:  # duckdb
-                analytic_file = os.environ.get("DUCKDB_ANALYTIC_FILE")
-                if not analytic_file:
-                    st.error("DUCKDB_ANALYTIC_FILE environment variable is required when ANALYTIC_DATABASE=duckdb")
-                    st.stop()
-                analytic_path = os.path.join(sess.config_base_path, analytic_file)
-                sess.analytic_db = create_analytic_database("duckdb", duckdb_path=analytic_path)
+            analytic_path = os.path.join(sess.config_base_path, analytic_file)
+            try:
+                sess.analytic_db = DuckDBAnalytic(analytic_path)
                 print(f"DEBUG - Using DuckDB for analytic queries: {analytic_path}")
+            except Exception as e:
+                st.error(f"Failed to initialize DuckDB analytic database: {e}")
+                st.stop()
 
         if 'conv_manager' not in sess:
             sess.conv_manager = ConversationManager(sess.metadata_db)

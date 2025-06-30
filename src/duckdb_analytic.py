@@ -4,9 +4,7 @@ import traceback
 import re
 from typing import Optional, Tuple
 
-from .analytic_database import AnalyticDatabase
-
-class DuckDBAnalytic(AnalyticDatabase):
+class DuckDBAnalytic:
     """DuckDB implementation of analytic database operations."""
     
     CREATE_TABLE_REGEX = r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+(?:\.\w+)?)"
