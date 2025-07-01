@@ -901,9 +901,13 @@ def main():
                 st.error("DUCKDB_ANALYTIC_FILE environment variable is required in settings.env")
                 st.stop()
             
+            # Determine if connection should be read-only from environment variable
+            read_only_str = os.environ.get("ANALYTIC_DATABASE_READONLY", "false")
+            read_only = read_only_str.lower() == 'true'
+
             analytic_path = os.path.join(sess.config_base_path, analytic_file)
             try:
-                sess.analytic_db = DuckDBAnalytic(analytic_path)
+                sess.analytic_db = DuckDBAnalytic(analytic_path, read_only=read_only)
                 print(f"DEBUG - Using DuckDB for analytic queries: {analytic_path}")
             except Exception as e:
                 st.error(f"Failed to initialize DuckDB analytic database: {e}")
