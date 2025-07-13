@@ -944,10 +944,6 @@ def main():
     st.markdown(ACTION_BUTTON_STYLES, unsafe_allow_html=True)
     
 
-    
-
-
-    
     # Render UI
     with st.sidebar:
         sess.conv_manager.render_sidebar() # Use session state instance directly

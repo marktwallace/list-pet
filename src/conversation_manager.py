@@ -2,11 +2,7 @@ from datetime import datetime
 import os
 import streamlit as st
 import sys
-import subprocess
 import re
-import time
-import select
-import fcntl
 
 from .metadata_database import MetadataDatabase
 from .llm_handler import LLMHandler
@@ -174,25 +170,10 @@ class ConversationManager:
                 return
             st.rerun()
         
-        # ETL button (only show if RUN_ETL_PIPELINE is configured)
-        if os.environ.get("RUN_ETL_PIPELINE"):
-            if st.sidebar.button("🔄 Run ETL", key="run-etl-button", type="secondary", use_container_width=True):
-                self.run_etl_pipeline()
-                st.rerun()
-            
-            # Show last ETL result if available
-            if 'etl_last_result' in st.session_state:
-                result = st.session_state.etl_last_result
-                col1, col2 = st.sidebar.columns([4, 1])
-                with col1:
-                    if result["success"]:
-                        st.success(f"{result['message']} (at {result['timestamp']})")
-                    else:
-                        st.error(f"{result['message']} (at {result['timestamp']})")
-                with col2:
-                    if st.button("×", key="dismiss-etl-result", help="Dismiss ETL result"):
-                        del st.session_state.etl_last_result
-                        st.rerun()
+        # Show database timestamp
+        if hasattr(st.session_state, 'analytic_db') and st.session_state.analytic_db:
+            timestamp = st.session_state.analytic_db.get_timestamp()
+            st.sidebar.info(f"Data updated: {timestamp}")
         
         # Display conversations
         if not conversations:
@@ -361,211 +342,6 @@ class ConversationManager:
             exported_count += 1
             
         return exported_count, timestamp
-
-    def run_etl_pipeline(self):
-        """Execute the ETL pipeline as a subprocess with real-time progress tracking."""
-        # Get ETL command from environment
-        etl_command = os.environ.get("RUN_ETL_PIPELINE")
-        if not etl_command:
-            st.error("RUN_ETL_PIPELINE environment variable not set")
-            return False
-        
-        # Get base path from session state
-        base_path = st.session_state.get('config_base_path', '.')
-        
-        # Create logs directory
-        logs_dir = os.path.join(base_path, "logs")
-        os.makedirs(logs_dir, exist_ok=True)
-        
-        # Generate timestamped log filename
-        timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M')
-        log_file = os.path.join(logs_dir, f"{timestamp}.log")
-        
-        try:
-            # Close analytic database connection to avoid conflicts
-            if hasattr(st.session_state, 'analytic_db') and st.session_state.analytic_db:
-                st.session_state.analytic_db.close()
-                print(f"DEBUG - Closed analytic database connection for ETL")
-            
-            # Split command and run ETL
-            cmd_parts = etl_command.split()
-            print(f"DEBUG - Running ETL command: {cmd_parts} in directory: {base_path}")
-            
-            # Start subprocess with real-time stdout
-            process = subprocess.Popen(
-                cmd_parts,
-                cwd=base_path,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,  # Line buffered
-                universal_newlines=True,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"}  # Force Python to be unbuffered
-            )
-            
-            # Progress tracking variables
-            total_runs = None
-            progress_bar = None
-            status_text = None
-            
-            # Create initial progress display
-            progress_container = st.empty()
-            
-            with open(log_file, 'w') as log_f:
-                try:
-                    # Set stdout to non-blocking mode
-                    fd = process.stdout.fileno()
-                    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-                    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-                    
-                    while True:
-                        # Check if process has finished
-                        if process.poll() is not None:
-                            break
-                            
-                        # Try to read any available output
-                        try:
-                            line = process.stdout.readline()
-                            if line:
-                                # Write to log file
-                                log_f.write(line)
-                                log_f.flush()
-                                
-                                # Look for initial ETL status line with run counts
-                                if total_runs is None:
-                                    # Try both patterns - the original and the new format
-                                    match = re.search(r'Processing (\d+) sequencing runs \((\d+) have new analyte data\):?', line)
-                                    if not match:
-                                        match = re.search(r'Sequencing runs: (\d+).*?\((\d+) have new analyte data\)', line)
-                                    if not match:
-                                        match = re.search(r'Processing (\d+) sequencing runs \((\d+) have new analyte data\)', line)
-                                    
-                                    if match:
-                                        total_runs_all = int(match.group(1))
-                                        total_runs = int(match.group(2))  # Use the number with new data
-                                        print(f"DEBUG - Found total runs: {total_runs_all} ({total_runs} with new data)")
-                                        
-                                        # Create progress display
-                                        with progress_container.container():
-                                            st.write("🔄 **ETL Pipeline Running**")
-                                            progress_bar = st.progress(0, text=f"Processing {total_runs} runs with new analyte data...")
-                                            status_text = st.empty()
-                                    else:
-                                        print(f"DEBUG - No match for initial pattern in: {line.strip()}")
-                                
-                                # Look for "Progress: X/Y runs completed" pattern
-                                if total_runs is not None:
-                                    progress_match = re.search(r'Progress: (\d+)/(\d+) runs completed', line)
-                                    if progress_match:
-                                        completed_runs = int(progress_match.group(1))
-                                        expected_total = int(progress_match.group(2))
-                                        
-                                        # Verify the total matches what we expect
-                                        if expected_total != total_runs:
-                                            print(f"WARNING - Progress total ({expected_total}) doesn't match expected ({total_runs})")
-                                        
-                                        # Update progress bar
-                                        progress_value = min(completed_runs / total_runs, 1.0)
-                                        if progress_bar is not None:
-                                            with progress_container.container():
-                                                st.write("🔄 **ETL Pipeline Running**")
-                                                progress_bar.progress(progress_value, text=f"Processing {total_runs} runs with new analyte data...")
-                                                status_text.text(f"Completed: {completed_runs}/{total_runs} runs with new data")
-                                                
-                                        print(f"DEBUG - Progress: {completed_runs}/{total_runs} runs ({progress_value:.1%})")
-                                        
-                                        # Force a small delay to make progress visible
-                                        st.empty()
-                                        time.sleep(0.1)  # 100ms delay
-                                
-                                # Check for completion
-                                if "ETL Complete" in line:
-                                    print(f"DEBUG - ETL completion detected")
-                                    if progress_bar is not None:
-                                        with progress_container.container():
-                                            st.write("✅ **ETL Pipeline Complete**")
-                                            st.progress(1.0, text="All sequencing runs processed!")
-                                            st.success("ETL pipeline finished successfully")
-                                    break
-                        except IOError:
-                            # No data available, wait a bit
-                            time.sleep(0.1)
-                            continue
-                    
-                    # Wait for process to complete
-                    return_code = process.wait(timeout=300)
-                    
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    progress_container.empty()
-                    st.session_state.etl_last_result = {
-                        "success": False,
-                        "message": f"❌ ETL pipeline timed out after 5 minutes. Check log: {log_file}",
-                        "timestamp": datetime.now().strftime('%H:%M:%S')
-                    }
-                    return False
-            
-            # Clear progress display
-            progress_container.empty()
-            
-            if return_code == 0:
-                print(f"DEBUG - ETL pipeline completed successfully, log: {log_file}")
-                st.session_state.etl_last_result = {
-                    "success": True,
-                    "message": f"✅ ETL pipeline completed successfully! Log: {log_file}",
-                    "timestamp": datetime.now().strftime('%H:%M:%S')
-                }
-                
-                # Reconnect to analytic database
-                self._reconnect_analytic_database()
-                return True
-            else:
-                print(f"ERROR - ETL pipeline failed with return code {return_code}")
-                st.session_state.etl_last_result = {
-                    "success": False,
-                    "message": f"❌ ETL pipeline failed (exit code: {return_code}). Check log: {log_file}",
-                    "timestamp": datetime.now().strftime('%H:%M:%S')
-                }
-                return False
-                
-        except Exception as e:
-            print(f"ERROR - ETL execution error: {str(e)}")
-            st.session_state.etl_last_result = {
-                "success": False,
-                "message": f"❌ Error running ETL pipeline: {str(e)}",
-                "timestamp": datetime.now().strftime('%H:%M:%S')
-            }
-            return False
-        finally:
-            # Always try to reconnect the analytic database
-            if not hasattr(st.session_state, 'analytic_db') or not st.session_state.analytic_db:
-                self._reconnect_analytic_database()
-
-    def _reconnect_analytic_database(self):
-        """Reconnect to the analytic database after ETL completion."""
-        try:
-            # Import here to avoid circular imports
-            from .analytic_factory import create_analytic_database
-            
-            base_path = st.session_state.get('config_base_path', '.')
-            
-            # Recreate analytic database connection using same logic as main()
-            postgres_conn_str = os.environ.get("POSTGRES_CONN_STR")
-            analytic_file = os.environ.get("DUCKDB_ANALYTIC_FILE")
-            
-            if postgres_conn_str:
-                st.session_state.analytic_db = create_analytic_database("postgresql", postgres_conn_str=postgres_conn_str)
-                print("DEBUG - Reconnected to PostgreSQL for analytic queries")
-            elif analytic_file:
-                analytic_path = os.path.join(base_path, analytic_file)
-                st.session_state.analytic_db = create_analytic_database("duckdb", duckdb_path=analytic_path)
-                print(f"DEBUG - Reconnected to DuckDB for analytic queries: {analytic_path}")
-            else:
-                st.error("Cannot reconnect: Neither POSTGRES_CONN_STR nor DUCKDB_ANALYTIC_FILE is set")
-                
-        except Exception as e:
-            st.error(f"Failed to reconnect to analytic database: {str(e)}")
-            print(f"ERROR - Database reconnection failed: {str(e)}")
 
     def init_session_state(self):
         """Initialize session state with a new conversation"""
