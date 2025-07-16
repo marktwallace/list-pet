@@ -2,34 +2,22 @@ import duckdb
 import os
 import shutil
 from datetime import datetime, timezone
-import threading
-import time
 
 class DuckDBAnalytic:
-    def __init__(self, db_path: str, read_only: bool = False, idle_timeout: int = 60):
+    def __init__(self, db_path: str, read_only: bool = False):
         """
-        Initialize DuckDB connection with idle management support.
+        Initialize DuckDB connection.
         
         Args:
             db_path: Path to the DuckDB database file
             read_only: Whether to open in read-only mode
-            idle_timeout: Seconds of inactivity before auto-closing connection (default 1 minute)
         """
         self.db_path = db_path
         self.read_only = read_only
-        self.idle_timeout = idle_timeout
         self.conn = None
-        self.last_activity = time.time()
-        self.lock = threading.Lock()
-        self.idle_timer = None
-        
-        print(f"DEBUG - DuckDB idle timeout: {idle_timeout}s")
         
         # Connect initially
         self._connect()
-        
-        # Start idle monitoring
-        self._start_idle_monitor()
 
     def _connect(self):
         """Establish database connection."""
@@ -40,56 +28,16 @@ class DuckDBAnalytic:
             else:
                 self.conn = duckdb.connect(self.db_path)
                 print(f"DEBUG - DuckDB analytic connection established: {self.db_path}")
-                
-            self.last_activity = time.time()
             
         except Exception as e:
             print(f"ERROR - Failed to connect to DuckDB: {e}")
             self.conn = None
             raise
 
-    def _close_connection(self):
-        """Close the database connection."""
-        with self.lock:
-            if self.conn:
-                try:
-                    self.conn.close()
-                    print(f"DEBUG - DuckDB connection closed due to inactivity")
-                except Exception as e:
-                    print(f"DEBUG - Error closing DuckDB connection: {e}")
-                finally:
-                    self.conn = None
-
-    def _start_idle_monitor(self):
-        """Start the idle monitoring timer."""
-        def check_idle():
-            current_time = time.time()
-            idle_duration = current_time - self.last_activity
-            
-            with self.lock:
-                if self.conn and idle_duration > self.idle_timeout:
-                    print(f"DEBUG - Closing connection after {idle_duration:.0f}s inactivity")
-                    self._close_connection()
-            
-            # Schedule next check
-            if hasattr(self, 'idle_timer'):  # Check if object still exists
-                self.idle_timer = threading.Timer(30, check_idle)  # Check every 30 seconds 
-                self.idle_timer.daemon = True
-                self.idle_timer.start()
-        
-        # Start the first timer
-        self.idle_timer = threading.Timer(30, check_idle)
-        self.idle_timer.daemon = True
-        self.idle_timer.start()
-        print(f"DEBUG - Idle monitor started, connection will close after {self.idle_timeout}s of inactivity")
-
     def _ensure_connected(self):
-        """Ensure we have an active connection, reconnecting if necessary."""
-        with self.lock:
-            if not self.conn:
-                print("DEBUG - Reconnecting to database after idle closure")
-                self._connect()
-            self.last_activity = time.time()
+        """Ensure we have an active connection."""
+        if not self.conn:
+            raise RuntimeError("Database connection not available")
 
     def check_and_swap(self):
         """Check for .new file and perform hot-swap if present."""
@@ -100,48 +48,47 @@ class DuckDBAnalytic:
             
         print(f"DEBUG - Hot-swap: .new file detected at {new_file_path}")
         
-        with self.lock:
-            try:
-                # Close current connection to release file lock
-                if self.conn:
-                    self.conn.close()
-                    print("DEBUG - Hot-swap: Closed current connection")
-                
-                # Create backup of current database
-                backup_path = f"{self.db_path}.old"
-                if os.path.exists(self.db_path):
-                    shutil.move(self.db_path, backup_path)
-                    print(f"DEBUG - Hot-swap: Moved {self.db_path} to {backup_path}")
-                
-                # Move new file to main location
-                shutil.move(new_file_path, self.db_path)
-                print(f"DEBUG - Hot-swap: Moved {new_file_path} to {self.db_path}")
-                
-                # Reconnect to new database
-                self._connect()
-                
-                # Get new timestamp
-                new_timestamp = self.get_timestamp()
-                print(f"DEBUG - Hot-swap completed successfully. New timestamp: {new_timestamp}")
-                
-                return True
-                
-            except Exception as e:
-                print(f"ERROR - Hot-swap failed: {e}")
-                # Try to restore from backup if swap failed
-                backup_path = f"{self.db_path}.old"
-                if os.path.exists(backup_path):
-                    try:
-                        shutil.move(backup_path, self.db_path)
-                        self._connect()
-                        print("DEBUG - Restored from backup after failed hot-swap")
-                    except Exception as restore_error:
-                        print(f"ERROR - Failed to restore from backup: {restore_error}")
-                return False
+        try:
+            # Close current connection to release file lock
+            if self.conn:
+                self.conn.close()
+                print("DEBUG - Hot-swap: Closed current connection")
+            
+            # Create backup of current database
+            backup_path = f"{self.db_path}.old"
+            if os.path.exists(self.db_path):
+                shutil.move(self.db_path, backup_path)
+                print(f"DEBUG - Hot-swap: Moved {self.db_path} to {backup_path}")
+            
+            # Move new file to main location
+            shutil.move(new_file_path, self.db_path)
+            print(f"DEBUG - Hot-swap: Moved {new_file_path} to {self.db_path}")
+            
+            # Reconnect to new database
+            self._connect()
+            
+            # Get new timestamp
+            new_timestamp = self.get_timestamp()
+            print(f"DEBUG - Hot-swap completed successfully. New timestamp: {new_timestamp}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"ERROR - Hot-swap failed: {e}")
+            # Try to restore from backup if swap failed
+            backup_path = f"{self.db_path}.old"
+            if os.path.exists(backup_path):
+                try:
+                    shutil.move(backup_path, self.db_path)
+                    self._connect()
+                    print("DEBUG - Restored from backup after failed hot-swap")
+                except Exception as restore_error:
+                    print(f"ERROR - Failed to restore from backup: {restore_error}")
+            return False
 
     def execute_query(self, sql: str):
         """
-        Execute a SQL query with hot-swap check and auto-reconnection.
+        Execute a SQL query with hot-swap check.
         
         Returns:
             tuple: (DataFrame or None, error_message or None)
@@ -206,19 +153,12 @@ class DuckDBAnalytic:
         }
 
     def close(self):
-        """Clean shutdown of the database connection and idle monitor."""
-        with self.lock:
-            # Stop idle timer
-            if self.idle_timer:
-                self.idle_timer.cancel()
-                print("DEBUG - Cancelled idle timer")
-            
-            # Close connection
-            if self.conn:
-                try:
-                    self.conn.close()
-                    print("DEBUG - DuckDB connection closed")
-                except Exception as e:
-                    print(f"DEBUG - Error during connection close: {e}")
-                finally:
-                    self.conn = None 
+        """Clean shutdown of the database connection."""
+        if self.conn:
+            try:
+                self.conn.close()
+                print("DEBUG - DuckDB connection closed")
+            except Exception as e:
+                print(f"DEBUG - Error during connection close: {e}")
+            finally:
+                self.conn = None 
