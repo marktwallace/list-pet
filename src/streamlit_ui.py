@@ -947,11 +947,6 @@ def main():
     # Render UI
     with st.sidebar:
         sess.conv_manager.render_sidebar() # Use session state instance directly
-        st.divider()
-        if st.button("🛑 Cleanup and Exit", type="secondary"):
-            print("DEBUG - Cleanup button pressed")
-            cleanup_resources()
-            st.stop()
     
     # Determine icon for display in the title
     title_icon_path = None
