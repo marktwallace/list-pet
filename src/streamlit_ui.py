@@ -503,13 +503,13 @@ def display_message(idx, message, sess, analytic_db, metadata_db):
                         with st.expander(title_text(item["content"]), expanded=False):
                             st.code(item["content"])
                 
-                # Create a row of action buttons (👍, 👎, ✏️) laid out with Streamlit columns.
+                # Create a row of action buttons (👍˄, 👎˅, ✏️✎) laid out with Streamlit columns.
                 cols = st.columns([0.1, 0.1, 0.1, 1])
 
                 # --- THUMBS UP ---
                 with cols[0]:
                     up_type = "primary" if message.get('feedback_score', 0) == 1 else "secondary"
-                    if st.button("˄", key=f"thumbs_up_{idx}", help="Thumbs up", type=up_type):
+                    if st.button("👍", key=f"thumbs_up_{idx}", help="Thumbs up", type=up_type):
                         new_score = 0 if message.get('feedback_score', 0) == 1 else 1
                         metadata_db.update_feedback_score(message['id'], new_score)
                         _reload_and_rerun(sess, metadata_db)
@@ -517,14 +517,14 @@ def display_message(idx, message, sess, analytic_db, metadata_db):
                 # --- THUMBS DOWN ---
                 with cols[1]:
                     down_type = "primary" if message.get('feedback_score', 0) == -1 else "secondary"
-                    if st.button("˅", key=f"thumbs_down_{idx}", help="Thumbs down", type=down_type):
+                    if st.button("👎", key=f"thumbs_down_{idx}", help="Thumbs down", type=down_type):
                         new_score = 0 if message.get('feedback_score', 0) == -1 else -1
                         metadata_db.update_feedback_score(message['id'], new_score)
                         _reload_and_rerun(sess, metadata_db)
 
                 # --- EDIT ---
                 with cols[2]:
-                    if st.button("✎", key=f"edit_{idx}", help="Edit message", type="secondary"):
+                    if st.button("✏️", key=f"edit_{idx}", help="Edit message", type="secondary"):
                         sess.editing_message_id = message.get('id')
                         st.rerun()
 
