@@ -15,6 +15,7 @@ class DuckDBAnalytic:
         self.db_path = db_path
         self.read_only = read_only
         self.conn = None
+        self.cached_timestamp = None
         
         # Connect initially
         self._connect()
@@ -29,9 +30,13 @@ class DuckDBAnalytic:
                 self.conn = duckdb.connect(self.db_path)
                 print(f"DEBUG - DuckDB analytic connection established: {self.db_path}")
             
+            # Cache the timestamp immediately after successful connection
+            self.cached_timestamp = self._query_timestamp()
+            
         except Exception as e:
             print(f"ERROR - Failed to connect to DuckDB: {e}")
             self.conn = None
+            self.cached_timestamp = None
             raise
 
     def _ensure_connected(self):
@@ -64,12 +69,10 @@ class DuckDBAnalytic:
             shutil.move(new_file_path, self.db_path)
             print(f"DEBUG - Hot-swap: Moved {new_file_path} to {self.db_path}")
             
-            # Reconnect to new database
+            # Reconnect to new database (this will update cached_timestamp)
             self._connect()
             
-            # Get new timestamp
-            new_timestamp = self.get_timestamp()
-            print(f"DEBUG - Hot-swap completed successfully. New timestamp: {new_timestamp}")
+            print(f"DEBUG - Hot-swap completed successfully. New timestamp: {self.cached_timestamp}")
             
             return True
             
@@ -110,14 +113,15 @@ class DuckDBAnalytic:
             print(f"ERROR - {error_msg}")
             return None, error_msg
 
-    def get_timestamp(self):
-        """Get the database timestamp if configured."""
+    def _query_timestamp(self):
+        """Query the database timestamp if configured. Only called when connection changes."""
         timestamp_query = os.environ.get("DB_TIMESTAMP_QUERY")
         if not timestamp_query:
-            print("DEBUG - No DB_TIMESTAMP_QUERY configured")
+            print("DEBUG - No DB_TIMESTAMP_QUERY configured, timestamp will be 'Unknown'")
             return "Unknown"
         
         try:
+            print(f"DEBUG - Querying database timestamp with: {timestamp_query}")
             self._ensure_connected()
             result = self.conn.execute(timestamp_query).fetchone()
             if result and result[0]:
@@ -125,9 +129,13 @@ class DuckDBAnalytic:
                 if isinstance(result[0], str):
                     try:
                         dt = datetime.fromisoformat(result[0].replace('Z', '+00:00'))
-                        return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                        timestamp = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                        print(f"DEBUG - Database timestamp retrieved: {timestamp}")
+                        return timestamp
                     except ValueError:
-                        return str(result[0])
+                        timestamp = str(result[0])
+                        print(f"DEBUG - Database timestamp retrieved (raw): {timestamp}")
+                        return timestamp
                 # Handle datetime objects
                 elif hasattr(result[0], 'strftime'):
                     if result[0].tzinfo is None:
@@ -135,13 +143,22 @@ class DuckDBAnalytic:
                         dt = result[0].replace(tzinfo=timezone.utc)
                     else:
                         dt = result[0]
-                    return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    timestamp = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    print(f"DEBUG - Database timestamp retrieved: {timestamp}")
+                    return timestamp
                 else:
-                    return str(result[0])
+                    timestamp = str(result[0])
+                    print(f"DEBUG - Database timestamp retrieved (converted): {timestamp}")
+                    return timestamp
+            print("DEBUG - Database timestamp query returned no result")
             return "Unknown"
         except Exception as e:
-            print(f"DEBUG - Error getting timestamp: {e}")
+            print(f"DEBUG - Error querying timestamp: {e}")
             return "Unknown"
+
+    def get_timestamp(self):
+        """Get the cached database timestamp."""
+        return self.cached_timestamp or "Unknown"
 
     def get_connection_info(self) -> dict:
         """Get information about the DuckDB connection."""
@@ -161,4 +178,5 @@ class DuckDBAnalytic:
             except Exception as e:
                 print(f"DEBUG - Error during connection close: {e}")
             finally:
-                self.conn = None 
+                self.conn = None
+                self.cached_timestamp = None 
