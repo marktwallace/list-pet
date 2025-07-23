@@ -16,6 +16,14 @@ class MetadataDatabase:
         if db_path:
             try:
                 self.conn = duckdb.connect(db_path)
+                
+                # Set DuckDB to use UTC timezone to avoid server timezone issues
+                try:
+                    self.conn.execute("SET TimeZone = 'UTC'")
+                    print("DEBUG - Metadata database timezone set to UTC")
+                except Exception as tz_error:
+                    print(f"WARNING - Failed to set metadata database timezone to UTC: {tz_error}")
+                    
             except (duckdb.BinderException, duckdb.OperationalError) as e:
                 # Check if it's a WAL replay error
                 if "Failure while replaying WAL" in str(e):

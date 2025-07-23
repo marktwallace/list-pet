@@ -30,6 +30,13 @@ class DuckDBAnalytic:
                 self.conn = duckdb.connect(self.db_path)
                 print(f"DEBUG - DuckDB analytic connection established: {self.db_path}")
             
+            # Set DuckDB to use UTC timezone to avoid server timezone issues
+            try:
+                self.conn.execute("SET TimeZone = 'UTC'")
+                print("DEBUG - DuckDB timezone set to UTC")
+            except Exception as tz_error:
+                print(f"WARNING - Failed to set DuckDB timezone to UTC: {tz_error}")
+            
             # Cache the timestamp immediately after successful connection
             self.cached_timestamp = self._query_timestamp()
             
@@ -125,6 +132,9 @@ class DuckDBAnalytic:
             self._ensure_connected()
             result = self.conn.execute(timestamp_query).fetchone()
             if result and result[0]:
+                raw_value = result[0]
+                print(f"DEBUG - Raw database timestamp value: {raw_value} (type: {type(raw_value)})")
+                
                 # Convert to datetime if it's a string
                 if isinstance(result[0], str):
                     try:
@@ -140,8 +150,10 @@ class DuckDBAnalytic:
                 elif hasattr(result[0], 'strftime'):
                     if result[0].tzinfo is None:
                         # Assume UTC if no timezone
+                        print(f"DEBUG - DateTime object has no timezone info, assuming UTC")
                         dt = result[0].replace(tzinfo=timezone.utc)
                     else:
+                        print(f"DEBUG - DateTime object timezone: {result[0].tzinfo}")
                         dt = result[0]
                     timestamp = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
                     print(f"DEBUG - Database timestamp retrieved: {timestamp}")

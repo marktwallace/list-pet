@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import streamlit as st
 import sys
@@ -23,9 +23,9 @@ class ConversationManager:
         
     def _init_logging(self):
         """Initialize logging for the conversation."""
-        log_dir = f"logs/{datetime.now().strftime('%m-%d')}"
+        log_dir = f"logs/{datetime.now(timezone.utc).strftime('%m-%d')}"
         os.makedirs(log_dir, exist_ok=True)
-        st.session_state.logfile = open(f"{log_dir}/{datetime.now().strftime('%H-%M')}.log", "w")
+        st.session_state.logfile = open(f"{log_dir}/{datetime.now(timezone.utc).strftime('%H-%M')}.log", "w")
         
     def log(self, role: str, message: str):
         """Write a message to the conversation log."""
@@ -299,7 +299,7 @@ class ConversationManager:
         base_path = st.session_state.get('config_base_path', '.')
         
         # Create timestamped directory under training/
-        timestamp = datetime.now().strftime('%m-%d-%H-%M')
+        timestamp = datetime.now(timezone.utc).strftime('%m-%d-%H-%M')
         export_dir = os.path.join(base_path, "training", timestamp)
         os.makedirs(export_dir, exist_ok=True)
         
