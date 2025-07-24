@@ -50,6 +50,29 @@ def title_text(input):
     """Helper function to truncate titles"""
     return input if len(input) <= 120 else input[:117] + "..."
 
+def get_preceding_user_message_text(db_messages, assistant_message_id):
+    """Find the user message that preceded the given assistant message."""
+    # Find the assistant message being rated
+    assistant_idx = None
+    for i, message in enumerate(db_messages):
+        if message.get('id') == assistant_message_id:
+            assistant_idx = i
+            break
+    
+    if assistant_idx is None:
+        return "Assistant message not found"
+    
+    # Work backwards from the assistant message to find the preceding user message
+    for i in range(assistant_idx - 1, -1, -1):
+        message = db_messages[i]
+        if message["role"] == USER_ROLE:
+            # Extract just the text portion using get_elements
+            elements = get_elements(message["content"])
+            markdown_text = elements.get("markdown", "").strip()
+            return markdown_text if markdown_text else "No text content found"
+    
+    return "No preceding user message found"
+
 def create_action_buttons_html(message_id, idx, current_score):
     """Create custom HTML action buttons with proper styling and event handling"""
     
@@ -135,6 +158,112 @@ def create_action_buttons_html(message_id, idx, current_score):
     """
     
     return html
+
+@st.dialog("👍 Thumbs Up Feedback")
+def thumbs_up_dialog(message_id, db_messages, metadata_db):
+    """Dialog for collecting detailed thumbs up feedback."""
+    # Get existing feedback if any
+    existing_feedback = metadata_db.get_feedback_details(message_id, 'thumbs_up')
+    
+    # Get default text from preceding user message
+    default_text = get_preceding_user_message_text(db_messages, message_id)
+    
+    st.write("Help us improve by providing feedback:")
+    
+    # Remember checkbox
+    remember_default = existing_feedback.get('remember_uprate', False) if existing_feedback else False
+    remember_uprate = st.checkbox(
+        "Remember this for future reference?", 
+        value=remember_default,
+        help="Check this if you want this interaction saved as a memory for the AI to reference later."
+    )
+    
+    # Description text area
+    description_default = existing_feedback.get('description_text', default_text) if existing_feedback else default_text
+    description_text = st.text_area(
+        "Description (for AI learning):",
+        value=description_default,
+        height=100,
+        help="This text will be used for embedding and memory creation. Edit as needed."
+    )
+    
+    # Action buttons
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Cancel"):
+            st.rerun()
+    
+    with col2:
+        if st.button("Submit", type="primary"):
+            # Save feedback details
+            success = metadata_db.save_feedback_details(
+                message_id=message_id,
+                feedback_type='thumbs_up', 
+                remember_uprate=remember_uprate,
+                description_text=description_text
+            )
+            
+            if success:
+                # Update the feedback score to 1 (thumbs up)
+                metadata_db.update_feedback_score(message_id, 1)
+                st.success("Feedback saved successfully!")
+                st.session_state.feedback_dialog_message_id = None
+                st.rerun()
+            else:
+                st.error("Failed to save feedback. Please try again.")
+
+@st.dialog("👎 Thumbs Down Feedback") 
+def thumbs_down_dialog(message_id, metadata_db):
+    """Dialog for collecting detailed thumbs down feedback."""
+    # Get existing feedback if any
+    existing_feedback = metadata_db.get_feedback_details(message_id, 'thumbs_down')
+    
+    st.write("Help us understand what went wrong:")
+    
+    # What was wrong text area
+    wrong_default = existing_feedback.get('what_was_wrong', '') if existing_feedback else ''
+    what_was_wrong = st.text_area(
+        "What was wrong with this response?",
+        value=wrong_default,
+        height=100,
+        help="Describe what specifically was incorrect, unhelpful, or problematic."
+    )
+    
+    # What user wanted text area  
+    wanted_default = existing_feedback.get('what_user_wanted', '') if existing_feedback else ''
+    what_user_wanted = st.text_area(
+        "What did you want the AI to do instead?",
+        value=wanted_default,
+        height=100,
+        help="Describe what the ideal response would have looked like."
+    )
+    
+    # Action buttons
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Cancel"):
+            st.rerun()
+    
+    with col2:
+        if st.button("Submit", type="primary"):
+            # Save feedback details
+            success = metadata_db.save_feedback_details(
+                message_id=message_id,
+                feedback_type='thumbs_down',
+                what_was_wrong=what_was_wrong,
+                what_user_wanted=what_user_wanted
+            )
+            
+            if success:
+                # Update the feedback score to -1 (thumbs down)
+                metadata_db.update_feedback_score(message_id, -1)
+                st.success("Feedback saved successfully!")
+                st.session_state.feedback_dialog_message_id = None
+                st.rerun()
+            else:
+                st.error("Failed to save feedback. Please try again.")
 
 def validate_element_indices(attributes, required_attrs, element_type="element"):
     """
@@ -510,17 +639,27 @@ def display_message(idx, message, sess, analytic_db, metadata_db):
                 with cols[0]:
                     up_type = "primary" if message.get('feedback_score', 0) == 1 else "secondary"
                     if st.button("👍", key=f"thumbs_up_{idx}", help="Thumbs up", type=up_type):
-                        new_score = 0 if message.get('feedback_score', 0) == 1 else 1
-                        metadata_db.update_feedback_score(message['id'], new_score)
-                        _reload_and_rerun(sess, metadata_db)
+                        # If already thumbs up, remove the rating
+                        if message.get('feedback_score', 0) == 1:
+                            metadata_db.update_feedback_score(message['id'], 0)
+                            metadata_db.delete_feedback_details(message['id'], 'thumbs_up')
+                            _reload_and_rerun(sess, metadata_db)
+                        else:
+                            # Open the thumbs up dialog
+                            thumbs_up_dialog(message['id'], sess.db_messages, metadata_db)
 
                 # --- THUMBS DOWN ---
                 with cols[1]:
                     down_type = "primary" if message.get('feedback_score', 0) == -1 else "secondary"
                     if st.button("👎", key=f"thumbs_down_{idx}", help="Thumbs down", type=down_type):
-                        new_score = 0 if message.get('feedback_score', 0) == -1 else -1
-                        metadata_db.update_feedback_score(message['id'], new_score)
-                        _reload_and_rerun(sess, metadata_db)
+                        # If already thumbs down, remove the rating
+                        if message.get('feedback_score', 0) == -1:
+                            metadata_db.update_feedback_score(message['id'], 0)
+                            metadata_db.delete_feedback_details(message['id'], 'thumbs_down')
+                            _reload_and_rerun(sess, metadata_db)
+                        else:
+                            # Open the thumbs down dialog
+                            thumbs_down_dialog(message['id'], metadata_db)
 
                 # --- EDIT ---
                 with cols[2]:

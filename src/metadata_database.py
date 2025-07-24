@@ -60,6 +60,11 @@ class MetadataDatabase:
                 START 1 INCREMENT 1
             """)
             
+            self.conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS pet_meta.feedback_details_seq
+                START 1 INCREMENT 1
+            """)
+            
             # Create conversations table
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS pet_meta.conversations (
@@ -86,6 +91,27 @@ class MetadataDatabase:
                 )
             """)
             self.conn.execute("ALTER TABLE pet_meta.message_log ADD COLUMN IF NOT EXISTS feedback_score INTEGER DEFAULT 0")
+            
+            # Create feedback_details table for detailed thumbs up/down feedback
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS pet_meta.feedback_details (
+                    id INTEGER PRIMARY KEY,
+                    message_id INTEGER NOT NULL,
+                    feedback_type VARCHAR NOT NULL, -- 'thumbs_up' or 'thumbs_down'
+                    
+                    -- Thumbs Up fields
+                    remember_uprate BOOLEAN,
+                    description_text TEXT,
+                    
+                    -- Thumbs Down fields  
+                    what_was_wrong TEXT,
+                    what_user_wanted TEXT,
+                    
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (message_id) REFERENCES pet_meta.message_log(id)
+                )
+            """)
             
             # Commit and checkpoint to ensure schema is durably persisted
             self.conn.commit()
@@ -377,3 +403,106 @@ class MetadataDatabase:
         except Exception as e:
             print(f"ERROR - Failed to perform manual WAL checkpoint: {e}")
             return False 
+
+    def save_feedback_details(self, message_id: int, feedback_type: str, 
+                             remember_uprate: bool = None, description_text: str = None,
+                             what_was_wrong: str = None, what_user_wanted: str = None) -> bool:
+        """Save or update detailed feedback for a message."""
+        try:
+            # Check if feedback already exists for this message and type
+            result = self.conn.execute("""
+                SELECT id FROM pet_meta.feedback_details 
+                WHERE message_id = ? AND feedback_type = ?
+            """, [message_id, feedback_type]).fetchone()
+            
+            if result:
+                # Update existing feedback
+                feedback_id = result[0]
+                updates = []
+                params = []
+                
+                if remember_uprate is not None:
+                    updates.append("remember_uprate = ?")
+                    params.append(remember_uprate)
+                if description_text is not None:
+                    updates.append("description_text = ?")
+                    params.append(description_text)
+                if what_was_wrong is not None:
+                    updates.append("what_was_wrong = ?")
+                    params.append(what_was_wrong)
+                if what_user_wanted is not None:
+                    updates.append("what_user_wanted = ?")
+                    params.append(what_user_wanted)
+                
+                if updates:
+                    updates.append("updated_at = CURRENT_TIMESTAMP")
+                    params.append(feedback_id)
+                    
+                    query = f"""
+                        UPDATE pet_meta.feedback_details 
+                        SET {', '.join(updates)}
+                        WHERE id = ?
+                    """
+                    self.conn.execute(query, params)
+            else:
+                # Insert new feedback
+                self.conn.execute("""
+                    INSERT INTO pet_meta.feedback_details 
+                    (id, message_id, feedback_type, remember_uprate, description_text, 
+                     what_was_wrong, what_user_wanted)
+                    VALUES (nextval('pet_meta.feedback_details_seq'), ?, ?, ?, ?, ?, ?)
+                """, [message_id, feedback_type, remember_uprate, description_text, 
+                      what_was_wrong, what_user_wanted])
+            
+            self.conn.commit()
+            print(f"DEBUG - Saved feedback details for message {message_id}, type {feedback_type}")
+            return True
+        except Exception as e:
+            print(f"ERROR - Failed to save feedback details: {e}")
+            print(traceback.format_exc())
+            return False
+
+    def get_feedback_details(self, message_id: int, feedback_type: str) -> dict | None:
+        """Get detailed feedback for a message and feedback type."""
+        try:
+            result = self.conn.execute("""
+                SELECT remember_uprate, description_text, what_was_wrong, what_user_wanted,
+                       created_at, updated_at
+                FROM pet_meta.feedback_details 
+                WHERE message_id = ? AND feedback_type = ?
+            """, [message_id, feedback_type]).fetchone()
+            
+            if result:
+                return {
+                    'remember_uprate': result[0],
+                    'description_text': result[1],
+                    'what_was_wrong': result[2],
+                    'what_user_wanted': result[3],
+                    'created_at': result[4],
+                    'updated_at': result[5]
+                }
+            return None
+        except Exception as e:
+            print(f"ERROR - Failed to get feedback details: {e}")
+            return None
+
+    def delete_feedback_details(self, message_id: int, feedback_type: str = None) -> bool:
+        """Delete feedback details for a message. If feedback_type is None, delete all."""
+        try:
+            if feedback_type:
+                self.conn.execute("""
+                    DELETE FROM pet_meta.feedback_details 
+                    WHERE message_id = ? AND feedback_type = ?
+                """, [message_id, feedback_type])
+            else:
+                self.conn.execute("""
+                    DELETE FROM pet_meta.feedback_details 
+                    WHERE message_id = ?
+                """, [message_id])
+            
+            self.conn.commit()
+            print(f"DEBUG - Deleted feedback details for message {message_id}")
+            return True
+        except Exception as e:
+            print(f"ERROR - Failed to delete feedback details: {e}")
+            return False
