@@ -19,6 +19,9 @@ The goal is to provide a working example that is:
 
 This project may serve as a foundation for experimentation with more advanced agent behaviors, memory strategies, or fine-tuned models.
 
+Agentic AI systems operate without the kind of social "lore" that human teams rely on — shared backstories, informal norms, and accumulated project memory. Instead, they depend on explicit, structured metadata to reason effectively. While humans can infer intent from sparse cues, LLMs require deeper, machine-readable context. This is why List Pet includes detailed SQL schemas, business logic in YAML, and tagged examples in the prompt. These elements act as a substitute for human lore, giving the agent a functional understanding of both the data and the domain. Over time, this project may explore new markup tags to extend that reasoning further, but the core insight remains: structured metadata enables meaningful AI agency.
+
+
 ## Implementation Notes
 
 The Cursor IDE was used to develop this project. Except for an initial prototype that had to be discarded, there wasn't any "vibe coding." In fact, around 1000 lines of code were written before allowing an LLM to suggest changes. Code brevity was prioritized, and LLM-generated additions are carefully reviewed.
