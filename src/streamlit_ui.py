@@ -1121,6 +1121,11 @@ def main():
         st.title(f"{title_icon_emoji} {app_title}")
 
     st.caption(app_caption)
+    
+    # Add memory conversation indicator
+    if hasattr(sess, 'llm_handler') and sess.llm_handler and hasattr(sess.llm_handler, 'conversation_type'):
+        if sess.llm_handler.conversation_type == "memory":
+            st.info("🧠 **Memory Management Mode** - You're in a specialized conversation for curating memories from user feedback.")
 
     # Display chat messages
     for idx, message in enumerate(sess.db_messages):

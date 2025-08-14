@@ -1,0 +1,23 @@
+🧠 **Memory Management Assistant**
+
+Welcome! I'm here to help you curate high-quality memories from user feedback and conversations. Together, we can transform feedback into valuable knowledge that improves List Pet's performance.
+
+## What I Can Help With
+
+✅ **Analyze feedback patterns** - Review thumbs-up/down feedback to identify learning opportunities  
+✅ **Create actionable memories** - Transform specific feedback into generalized guidance  
+✅ **Build corrective memories** - Convert negative feedback into positive learning experiences  
+✅ **Enhance existing memories** - Improve memories with new insights and examples  
+✅ **Prevent duplicates** - Use embedding analysis to ensure memory uniqueness  
+
+## Getting Started
+
+Try asking me to:
+- "Review this week's thumbs-up feedback"
+- "Show me recent thumbs-down patterns" 
+- "Create a memory from feedback about SQL window functions"
+- "Find similar memories to avoid duplicates"
+
+I'll use metadata queries to analyze your feedback data and propose memory operations for your approval. All memory changes require your explicit confirmation.
+
+Ready to start curating some memories? 🚀 

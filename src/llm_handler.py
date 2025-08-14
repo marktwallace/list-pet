@@ -10,18 +10,27 @@ import os
 import streamlit as st
 
 class LLMHandler:
-    def __init__(self, prompts, db=None, model_name=None):
+    def __init__(self, prompts, db=None, model_name=None, conversation_type="regular"):
         self.prompts = prompts
         self.messages = []
         self.db = db
+        self.conversation_type = conversation_type  # "regular" or "memory"
         _model_name_arg = model_name
         _model_name_env = os.environ.get("OPENAI_MODEL_NAME")
         self.model_name = _model_name_arg or _model_name_env or "gpt-4o-mini"
-        print(f"DEBUG - LLMHandler initialized with model: {self.model_name}")
+        print(f"DEBUG - LLMHandler initialized with model: {self.model_name}, type: {self.conversation_type}")
         
     def get_system_prompt(self):
-        base_prompt = self.prompts["system_prompt"]
-        return base_prompt
+        if self.conversation_type == "memory":
+            # Use memory-specific system prompt
+            if "memory_system_prompt" in self.prompts:
+                return self.prompts["memory_system_prompt"]
+            else:
+                print("WARNING - memory_system_prompt not found, falling back to default")
+                return self.prompts["system_prompt"]
+        else:
+            # Use regular system prompt
+            return self.prompts["system_prompt"]
         
     def add_message(self, role, content):
         """Add a message to the conversation history"""

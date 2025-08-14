@@ -77,6 +77,17 @@ class ConversationManager:
         
         return st.session_state.llm_handler.generate_title(user_content)
 
+    def _determine_conversation_type(self, conv_id):
+        """Determine if a conversation is a memory conversation based on its title."""
+        conversations = self.metadata_db.get_conversations()
+        for conv in conversations:
+            if conv['id'] == conv_id:
+                title = conv.get('title', '')
+                if title.startswith('🧠 Memories:') or 'memory' in title.lower():
+                    return "memory"
+                break
+        return "regular"
+
     def _load_conversation(self, conv_id):
         """Helper method to load a conversation and update session state"""
         sess = st.session_state
@@ -84,7 +95,8 @@ class ConversationManager:
         sess.db_messages = self.metadata_db.load_messages(conv_id)
         # Pass model name from environment, defaulting if not set
         openai_model_name = os.environ.get("OPENAI_MODEL_NAME") # LLMHandler will apply its own default if this is None
-        sess.llm_handler = LLMHandler(sess.prompts, self.metadata_db, model_name=openai_model_name)
+        conversation_type = self._determine_conversation_type(conv_id)
+        sess.llm_handler = LLMHandler(sess.prompts, self.metadata_db, model_name=openai_model_name, conversation_type=conversation_type)
         # Load messages into LLM handler
         for msg in sess.db_messages:
             sess.llm_handler.add_message(msg["role"], msg["content"])
@@ -98,6 +110,9 @@ class ConversationManager:
             st.session_state.dev_mode = False
         st.session_state.dev_mode = st.sidebar.toggle("Developer Mode", value=st.session_state.dev_mode)
         
+        # Get all conversations first (needed for various operations below)
+        conversations = self.metadata_db.get_conversations()
+        
         # Add Export Training button in dev mode
         if st.session_state.dev_mode:
             if st.sidebar.button("Export Training", type="secondary", use_container_width=True):
@@ -106,6 +121,23 @@ class ConversationManager:
                     st.sidebar.success(f"✅ Exported {exported_count} conversations to training/{timestamp}/")
                 else:
                     st.sidebar.warning("No conversations flagged for training found.")
+            
+            # Add Memory Conversation button in dev mode
+            if st.sidebar.button("🧠 New Memory Conversation", type="secondary", use_container_width=True):
+                # Check if current conversation needs renaming (same logic as new conversation)
+                current_conv = next((c for c in conversations if c['id'] == st.session_state.current_conversation_id), None)
+                if current_conv and current_conv['title'] == "Unlabeled Chat":
+                    print(f"DEBUG - Processing rename for conversation {current_conv['id']} before creating memory chat")
+                    messages = self.metadata_db.load_messages(current_conv['id'])
+                    new_title = self.generate_conversation_title(messages)
+                    if new_title:
+                        self.metadata_db.update_conversation(current_conv['id'], title=new_title)
+                
+                # Create new memory conversation
+                if self._initialize_memory_conversation() is None:
+                    st.sidebar.error("Failed to create memory conversation")
+                    return
+                st.rerun()
         
         # Show analytic database status
         if hasattr(st.session_state, 'analytic_db') and st.session_state.analytic_db:
@@ -119,9 +151,6 @@ class ConversationManager:
             st.sidebar.warning("📊 No Analytic DB")
         
         st.sidebar.divider()
-        
-        # Get all conversations first
-        conversations = self.metadata_db.get_conversations()
         
         # Process any pending renames from previous switch
         pending_renames = [k for k in st.session_state.keys() if k.startswith("pending_rename_")]
@@ -282,7 +311,7 @@ class ConversationManager:
         sess.db_messages = []
         # Pass model name from environment, defaulting if not set
         openai_model_name = os.environ.get("OPENAI_MODEL_NAME") # LLMHandler will apply its own default if this is None
-        sess.llm_handler = LLMHandler(sess.prompts, self.metadata_db, model_name=openai_model_name)
+        sess.llm_handler = LLMHandler(sess.prompts, self.metadata_db, model_name=openai_model_name, conversation_type="regular")
         
         # Add system prompt as first message
         system_prompt = sess.llm_handler.get_system_prompt()
@@ -290,6 +319,45 @@ class ConversationManager:
         
         # Add welcome message
         self.add_message(role=ASSISTANT_ROLE, content=sess.prompts["welcome_message"])
+        
+        return conv_id
+
+    def _initialize_memory_conversation(self, title="🧠 Memories: Unlabeled Chat"):
+        """Initialize a new memory conversation with specialized prompts."""
+        # Create new conversation
+        conv_id = self.metadata_db.create_conversation(title)
+        if conv_id is None:
+            return None
+            
+        # Set up session state
+        sess = st.session_state
+        sess.current_conversation_id = conv_id
+        sess.db_messages = []
+        
+        # Load memory-specific prompts from local list-pet directory (not LISTPET_BASE)
+        import os
+        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Go up to list-pet root
+        memory_prompts = get_prompts(current_dir)
+        
+        # Create a combined prompt set: application prompts + memory prompts
+        combined_prompts = sess.prompts.copy()
+        # Override with memory-specific prompts where they exist
+        if "memory_system_prompt" in memory_prompts:
+            combined_prompts["memory_system_prompt"] = memory_prompts["memory_system_prompt"]
+        if "memory_welcome_message" in memory_prompts:
+            combined_prompts["memory_welcome_message"] = memory_prompts["memory_welcome_message"]
+        
+        # Pass model name from environment, defaulting if not set
+        openai_model_name = os.environ.get("OPENAI_MODEL_NAME") # LLMHandler will apply its own default if this is None
+        sess.llm_handler = LLMHandler(combined_prompts, self.metadata_db, model_name=openai_model_name, conversation_type="memory")
+        
+        # Add memory-specific system prompt as first message
+        system_prompt = sess.llm_handler.get_system_prompt()
+        self.add_message(role=SYSTEM_ROLE, content=system_prompt)
+        
+        # Add memory-specific welcome message
+        welcome_message = combined_prompts.get("memory_welcome_message", sess.prompts["welcome_message"])
+        self.add_message(role=ASSISTANT_ROLE, content=welcome_message)
         
         return conv_id
 
@@ -419,4 +487,4 @@ class ConversationManager:
             if 'prompts' not in sess:
                 sess.prompts = get_prompts(sess.config_base_path)
             openai_model_name = os.environ.get("OPENAI_MODEL_NAME")
-            sess.llm_handler = LLMHandler(sess.prompts, self.metadata_db, model_name=openai_model_name) 
+            sess.llm_handler = LLMHandler(sess.prompts, self.metadata_db, model_name=openai_model_name, conversation_type="regular") 
