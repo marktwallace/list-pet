@@ -61,20 +61,39 @@ class DuckDBAnalytic:
         print(f"DEBUG - Hot-swap: .new file detected at {new_file_path}")
         
         try:
-            # Close current connection to release file lock
-            if self.conn:
-                self.conn.close()
-                print("DEBUG - Hot-swap: Closed current connection")
-            
-            # Create backup of current database
+            # Prepare file paths
             backup_path = f"{self.db_path}.old"
+            new_wal_path = f"{new_file_path}.wal"
+            current_wal_path = f"{self.db_path}.wal"
+            backup_wal_path = f"{backup_path}.wal"
+            
+            # CRITICAL: Move files FIRST while connection is still open
+            # This prevents race conditions where other code might reconnect
+            # to the database during the file operations
+            
+            # Move current database and WAL files to backup location
             if os.path.exists(self.db_path):
                 shutil.move(self.db_path, backup_path)
                 print(f"DEBUG - Hot-swap: Moved {self.db_path} to {backup_path}")
             
-            # Move new file to main location
+            # Move current WAL file if it exists
+            if os.path.exists(current_wal_path):
+                shutil.move(current_wal_path, backup_wal_path)
+                print(f"DEBUG - Hot-swap: Moved {current_wal_path} to {backup_wal_path}")
+            
+            # Move new database file to main location
             shutil.move(new_file_path, self.db_path)
             print(f"DEBUG - Hot-swap: Moved {new_file_path} to {self.db_path}")
+            
+            # Move new WAL file if it exists
+            if os.path.exists(new_wal_path):
+                shutil.move(new_wal_path, current_wal_path)
+                print(f"DEBUG - Hot-swap: Moved {new_wal_path} to {current_wal_path}")
+            
+            # NOW close the connection (after files are moved)
+            if self.conn:
+                self.conn.close()
+                print("DEBUG - Hot-swap: Closed current connection")
             
             # Reconnect to new database (this will update cached_timestamp)
             self._connect()
@@ -87,9 +106,25 @@ class DuckDBAnalytic:
             print(f"ERROR - Hot-swap failed: {e}")
             # Try to restore from backup if swap failed
             backup_path = f"{self.db_path}.old"
+            backup_wal_path = f"{backup_path}.wal"
+            current_wal_path = f"{self.db_path}.wal"
+            
             if os.path.exists(backup_path):
                 try:
+                    # Restore main database file
+                    if os.path.exists(self.db_path):
+                        os.remove(self.db_path)  # Remove potentially corrupt new file
                     shutil.move(backup_path, self.db_path)
+                    
+                    # Restore WAL file if it exists
+                    if os.path.exists(backup_wal_path):
+                        if os.path.exists(current_wal_path):
+                            os.remove(current_wal_path)  # Remove potentially corrupt new WAL
+                        shutil.move(backup_wal_path, current_wal_path)
+                    
+                    # Close any existing connection and reconnect
+                    if self.conn:
+                        self.conn.close()
                     self._connect()
                     print("DEBUG - Restored from backup after failed hot-swap")
                 except Exception as restore_error:
